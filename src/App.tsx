@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { getCandidateGrid, resolveFocus } from './candidates'
+import type { FocusCell, GridColumn } from './candidates'
 import { ACTION_OUTCOME_GRID, labelForAction, labelForOutcome } from './data/grid'
 import { formatTime, playerLabel } from './format'
 import {
@@ -10,6 +12,7 @@ import {
   rotateClockwise,
 } from './rotation'
 import { defaultSession } from './defaultRoster'
+import { ScoutGrid } from './ScoutGrid'
 import {
   exportSessionJson,
   loadSession,
@@ -29,6 +32,20 @@ import type {
 } from './types'
 import { COURT_POSITIONS, PLAYER_ROLES } from './types'
 import './App.css'
+
+type UndoSnapshot = {
+  events: ScoutEvent[]
+  match: MatchSession['match']
+  currentPlayerId: string | null
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+  if (target.isContentEditable) return true
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
+}
 
 type RosterDraft = {
   name: string
@@ -55,11 +72,16 @@ export default function App() {
   const [rosterDraft, setRosterDraft] = useState<RosterDraft>(emptyDraft)
   const [editPlayerId, setEditPlayerId] = useState<string | null>(null)
   const [suggestion, setSuggestion] = useState<FlowSuggestion | null>(null)
+  const [gridFocus, setGridFocus] = useState<FocusCell | null>(null)
+  const [gridActive, setGridActive] = useState(true)
   /** Bumps on rotate so court slots re-animate. */
   const [courtPulse, setCourtPulse] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const undoStackRef = useRef<UndoSnapshot[]>([])
+  const sessionRef = useRef(session)
+  sessionRef.current = session
   const positionsSig = useMemo(
     () => COURT_POSITIONS.map((p) => session.match.positions[p] ?? '').join('|'),
     [session.match.positions],
@@ -99,11 +121,31 @@ export default function App() {
     return [...session.events].sort((a, b) => a.t - b.t).at(-1) ?? null
   }, [session.events])
 
+  const candidateGrid = useMemo(() => {
+    if (editingId) {
+      return getCandidateGrid(null, [], session.match)
+    }
+    return getCandidateGrid(lastEvent, session.roster, session.match)
+  }, [lastEvent, session.roster, session.match, editingId])
+
   // Recompute suggestion when match/events change (not while editing an old event).
   useEffect(() => {
-    if (editingId) return
-    setSuggestion(suggestNext(lastEvent, session.roster, session.match))
-  }, [lastEvent, session.roster, session.match, editingId])
+    if (editingId) {
+      setSuggestion(null)
+      return
+    }
+    setSuggestion(candidateGrid.suggestion ?? suggestNext(lastEvent, session.roster, session.match))
+  }, [candidateGrid, lastEvent, session.roster, session.match, editingId])
+
+  // After each log / state change, snap focus to the new primary suggestion cell.
+  useEffect(() => {
+    if (editingId) {
+      setGridFocus(null)
+      return
+    }
+    setGridFocus((prev) => resolveFocus(candidateGrid, prev))
+    setGridActive(true)
+  }, [candidateGrid, editingId])
 
   function onPickVideo(file: File | undefined) {
     if (!file) return
@@ -216,28 +258,34 @@ export default function App() {
     return ACTION_OUTCOME_GRID.actions.find((a) => a.id === action)?.outcomes[0]?.id ?? null
   }
 
-  /**
-   * One-click / Enter: apply suggested player/action/outcome at playhead and append event.
-   * Returns true if an event was logged.
-   */
-  function logSuggestion(option: SuggestionOption): boolean {
+  function pushUndoSnapshot() {
+    const s = sessionRef.current
+    undoStackRef.current.push({
+      events: s.events,
+      match: s.match,
+      currentPlayerId: s.currentPlayerId,
+    })
+    if (undoStackRef.current.length > 100) undoStackRef.current.shift()
+  }
+
+  /** Log player + action + outcome at the video playhead. */
+  function logCell(playerId: string, action: string, outcome: string): boolean {
     if (editingId) return false
-    const playerId = option.playerId ?? session.currentPlayerId
-    const outcome = resolveOutcome(option.action, option.outcome)
-    if (!playerId || !option.action || !outcome) return false
+    if (!playerId || !action || !outcome) return false
 
     const t = videoRef.current?.currentTime ?? currentTime
     const event: ScoutEvent = {
       id: newId('ev'),
       playerId,
-      action: option.action,
+      action,
       outcome,
       t,
       source: 'human',
       status: 'accepted',
     }
+    pushUndoSnapshot()
     updateSession((s) => {
-      const change = possessionAfterEvent(option.action, outcome, s.match.servingTeam)
+      const change = possessionAfterEvent(action, outcome, s.match.servingTeam)
       const match = applyPossessionChange(s.match, change)
       return {
         ...s,
@@ -246,9 +294,77 @@ export default function App() {
         events: [...s.events, event].sort((a, b) => a.t - b.t),
       }
     })
-    setActionId(option.action)
+    setActionId(action)
     setOutcomeId(outcome)
     return true
+  }
+
+  /**
+   * One-click / Enter: apply suggested player/action/outcome at playhead and append event.
+   * Returns true if an event was logged.
+   */
+  function logSuggestion(option: SuggestionOption): boolean {
+    const playerId = option.playerId ?? session.currentPlayerId
+    const outcome = resolveOutcome(option.action, option.outcome)
+    if (!playerId || !option.action || !outcome) return false
+    return logCell(playerId, option.action, outcome)
+  }
+
+  function logFocusedCell(): boolean {
+    if (!gridActive || !gridFocus || editingId) return false
+    const player = candidateGrid.players[gridFocus.rowIndex]
+    const column = candidateGrid.columns[gridFocus.columnIndex]
+    if (!player || !column) return false
+    return logCell(player.id, column.action, column.outcome)
+  }
+
+  function onGridLog(player: RosterPlayer, column: GridColumn) {
+    logCell(player.id, column.action, column.outcome)
+  }
+
+  function undoLastEvent() {
+    const snap = undoStackRef.current.pop()
+    if (snap) {
+      updateSession((s) => ({
+        ...s,
+        events: snap.events,
+        match: snap.match,
+        currentPlayerId: snap.currentPlayerId,
+      }))
+      setEditingId(null)
+      return
+    }
+    // Fallback: drop last event only (match state may drift until next log)
+    if (session.events.length === 0) return
+    const sorted = [...session.events].sort((a, b) => a.t - b.t)
+    const last = sorted.at(-1)
+    if (!last) return
+    updateSession((s) => ({
+      ...s,
+      events: s.events.filter((e) => e.id !== last.id),
+    }))
+    setEditingId(null)
+  }
+
+  function moveGridFocus(dRow: number, dCol: number) {
+    if (candidateGrid.players.length === 0 || candidateGrid.columns.length === 0) return
+    setGridActive(true)
+    setGridFocus((prev) => {
+      const base = prev ?? resolveFocus(candidateGrid, null) ?? { rowIndex: 0, columnIndex: 0 }
+      const rowIndex =
+        (base.rowIndex + dRow + candidateGrid.players.length) % candidateGrid.players.length
+      const columnIndex =
+        (base.columnIndex + dCol + candidateGrid.columns.length) % candidateGrid.columns.length
+      return { rowIndex, columnIndex }
+    })
+  }
+
+  function jumpToPrimaryFocus() {
+    const next = resolveFocus(candidateGrid, null)
+    if (next) {
+      setGridActive(true)
+      setGridFocus(next)
+    }
   }
 
   function markEvent() {
@@ -281,6 +397,7 @@ export default function App() {
       source: 'human',
       status: 'accepted',
     }
+    pushUndoSnapshot()
     updateSession((s) => {
       const change = possessionAfterEvent(actionId, outcomeId, s.match.servingTeam)
       const match = applyPossessionChange(s.match, change)
@@ -324,6 +441,7 @@ export default function App() {
       try {
         const next = parseImportedSession(String(reader.result))
         setSession(next)
+        undoStackRef.current = []
         setEditingId(null)
         setSuggestion(null)
       } catch (err) {
@@ -344,6 +462,7 @@ export default function App() {
     const next = defaultSession()
     saveSession(next)
     setSession(next)
+    undoStackRef.current = []
     setEditingId(null)
     setSuggestion(null)
     setRosterDraft(emptyDraft())
@@ -352,30 +471,90 @@ export default function App() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const tag = (e.target as HTMLElement)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (isTypingTarget(e.target)) return
+
+      // Video seek — B/N ±5s, V/M ±1min; plain arrows stay on the scout grid
+      if (e.key === 'b' || e.key === 'B') {
+        e.preventDefault()
+        seekBy(-5)
+        return
+      }
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault()
+        seekBy(5)
+        return
+      }
+      if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault()
+        seekBy(-60)
+        return
+      }
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault()
+        seekBy(60)
+        return
+      }
+
       if (e.code === 'Space') {
         e.preventDefault()
         togglePlay()
-      } else if (e.key === 'j' || e.key === 'ArrowLeft') {
+        return
+      }
+
+      if (e.key === 'Backspace' || e.key === 'u' || e.key === 'U') {
         e.preventDefault()
-        seekBy(e.shiftKey ? -1 : -0.1)
-      } else if (e.key === 'l' || e.key === 'ArrowRight') {
+        undoLastEvent()
+        return
+      }
+
+      if (e.key === 'Escape') {
         e.preventDefault()
-        seekBy(e.shiftKey ? 1 : 0.1)
-      } else if (e.key === 'k') {
+        setGridActive(false)
+        return
+      }
+
+      if (e.key === 'Tab' && !editingId && candidateGrid.players.length > 0) {
         e.preventDefault()
-        togglePlay()
-      } else if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        jumpToPrimaryFocus()
+        return
+      }
+
+      // Grid navigation (plain arrows — never steal for seek)
+      if (!editingId && gridActive && candidateGrid.players.length > 0) {
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault()
+          moveGridFocus(0, -1)
+          return
+        }
+        if (e.key === 'ArrowRight') {
+          e.preventDefault()
+          moveGridFocus(0, 1)
+          return
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          moveGridFocus(-1, 0)
+          return
+        }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          moveGridFocus(1, 0)
+          return
+        }
+      }
+
+      if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
         if (editingId) return
+        if (logFocusedCell()) return
         if (suggestion?.primary) {
           logSuggestion(suggestion.primary)
           return
         }
-        // No suggestion: submit manual form only if complete
         if (session.currentPlayerId && actionId && outcomeId) markEvent()
-      } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        return
+      }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         markEvent()
       }
@@ -383,16 +562,22 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.currentPlayerId, actionId, outcomeId, editingId, suggestion])
+  }, [
+    session.currentPlayerId,
+    session.events,
+    actionId,
+    outcomeId,
+    editingId,
+    suggestion,
+    candidateGrid,
+    gridFocus,
+    gridActive,
+  ])
 
   const sortedEvents = useMemo(
     () => [...session.events].sort((a, b) => a.t - b.t),
     [session.events],
   )
-
-  const suggestionChips: SuggestionOption[] = suggestion
-    ? [suggestion.primary, ...suggestion.alternates]
-    : []
 
   return (
     <div className="app">
@@ -495,8 +680,8 @@ export default function App() {
             </span>
           </div>
           <p className="hint">
-            Keys: Space / K play-pause · J / L scrub (±0.1s, Shift ±1s) · Enter log
-            suggested next · ⌘/Ctrl+Enter mark form
+            Grid: ←→↑↓ · Enter log · Tab primary · Esc clear · Backspace/U undo · Space
+            play/pause · Seek B/N ±5s · V/M ±1min · ⌘/Ctrl+Enter mark form
           </p>
 
           <section className="panel match-panel">
@@ -688,32 +873,17 @@ export default function App() {
           </section>
 
           <section className="panel entry">
-            <h2>{editingId ? 'Edit event' : 'Mark event'}</h2>
-            {!editingId && suggestionChips.length > 0 && (
-              <div className="suggest-panel" aria-live="polite">
-                <div className="suggest-label">Suggested next · Enter to log</div>
-                <div className="suggest-chips">
-                  {suggestionChips.map((opt, i) => {
-                    const player = session.roster.find((p) => p.id === opt.playerId)
-                    return (
-                      <button
-                        key={`${opt.action}-${opt.playerId ?? 'any'}-${i}`}
-                        type="button"
-                        className={i === 0 ? 'suggest-chip primary-chip' : 'suggest-chip'}
-                        onClick={() => logSuggestion(opt)}
-                        title={`${opt.reason} (Enter logs primary)`}
-                      >
-                        <span className="suggest-main">
-                          {playerLabel(player, opt.playerId ? 'Unknown' : 'Any')} ·{' '}
-                          {labelForAction(opt.action)}
-                          {opt.outcome ? ` → ${labelForOutcome(opt.action, opt.outcome)}` : ''}
-                        </span>
-                        <span className="suggest-reason">{opt.reason}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
+            <h2>{editingId ? 'Edit event' : 'Scout grid'}</h2>
+            {!editingId && (
+              <ScoutGrid
+                grid={candidateGrid}
+                focus={gridActive ? gridFocus : null}
+                onFocusChange={(f) => {
+                  setGridActive(true)
+                  setGridFocus(f)
+                }}
+                onLog={onGridLog}
+              />
             )}
             <p className="current-line">
               Player:{' '}
