@@ -211,13 +211,44 @@ export default function App() {
     }))
   }
 
-  function acceptSuggestion(option: SuggestionOption) {
-    if (option.playerId) {
-      updateSession((s) => ({ ...s, currentPlayerId: option.playerId }))
+  function resolveOutcome(action: string, preferred: string | null): string | null {
+    if (preferred) return preferred
+    return ACTION_OUTCOME_GRID.actions.find((a) => a.id === action)?.outcomes[0]?.id ?? null
+  }
+
+  /**
+   * One-click / Enter: apply suggested player/action/outcome at playhead and append event.
+   * Returns true if an event was logged.
+   */
+  function logSuggestion(option: SuggestionOption): boolean {
+    if (editingId) return false
+    const playerId = option.playerId ?? session.currentPlayerId
+    const outcome = resolveOutcome(option.action, option.outcome)
+    if (!playerId || !option.action || !outcome) return false
+
+    const t = videoRef.current?.currentTime ?? currentTime
+    const event: ScoutEvent = {
+      id: newId('ev'),
+      playerId,
+      action: option.action,
+      outcome,
+      t,
+      source: 'human',
+      status: 'accepted',
     }
+    updateSession((s) => {
+      const change = possessionAfterEvent(option.action, outcome, s.match.servingTeam)
+      const match = applyPossessionChange(s.match, change)
+      return {
+        ...s,
+        currentPlayerId: playerId,
+        match,
+        events: [...s.events, event].sort((a, b) => a.t - b.t),
+      }
+    })
     setActionId(option.action)
-    if (option.outcome) setOutcomeId(option.outcome)
-    setSuggestion(null)
+    setOutcomeId(outcome)
+    return true
   }
 
   function markEvent() {
@@ -335,6 +366,15 @@ export default function App() {
       } else if (e.key === 'k') {
         e.preventDefault()
         togglePlay()
+      } else if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        if (editingId) return
+        if (suggestion?.primary) {
+          logSuggestion(suggestion.primary)
+          return
+        }
+        // No suggestion: submit manual form only if complete
+        if (session.currentPlayerId && actionId && outcomeId) markEvent()
       } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         markEvent()
@@ -343,7 +383,7 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.currentPlayerId, actionId, outcomeId, editingId])
+  }, [session.currentPlayerId, actionId, outcomeId, editingId, suggestion])
 
   const sortedEvents = useMemo(
     () => [...session.events].sort((a, b) => a.t - b.t),
@@ -455,7 +495,8 @@ export default function App() {
             </span>
           </div>
           <p className="hint">
-            Keys: Space / K play-pause · J / L scrub (±0.1s, Shift ±1s) · ⌘/Ctrl+Enter mark event
+            Keys: Space / K play-pause · J / L scrub (±0.1s, Shift ±1s) · Enter log
+            suggested next · ⌘/Ctrl+Enter mark form
           </p>
 
           <section className="panel match-panel">
@@ -650,7 +691,7 @@ export default function App() {
             <h2>{editingId ? 'Edit event' : 'Mark event'}</h2>
             {!editingId && suggestionChips.length > 0 && (
               <div className="suggest-panel" aria-live="polite">
-                <div className="suggest-label">Suggested next</div>
+                <div className="suggest-label">Suggested next · Enter to log</div>
                 <div className="suggest-chips">
                   {suggestionChips.map((opt, i) => {
                     const player = session.roster.find((p) => p.id === opt.playerId)
@@ -659,8 +700,8 @@ export default function App() {
                         key={`${opt.action}-${opt.playerId ?? 'any'}-${i}`}
                         type="button"
                         className={i === 0 ? 'suggest-chip primary-chip' : 'suggest-chip'}
-                        onClick={() => acceptSuggestion(opt)}
-                        title={opt.reason}
+                        onClick={() => logSuggestion(opt)}
+                        title={`${opt.reason} (Enter logs primary)`}
                       >
                         <span className="suggest-main">
                           {playerLabel(player, opt.playerId ? 'Unknown' : 'Any')} ·{' '}
