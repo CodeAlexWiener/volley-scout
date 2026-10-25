@@ -407,21 +407,37 @@ export default function App() {
             )}
           </div>
           <div className="transport">
-            <button type="button" onClick={() => seekBy(-1)}>
-              −1s
-            </button>
-            <button type="button" onClick={() => seekBy(-0.1)}>
-              −0.1s
-            </button>
-            <button type="button" className="primary" onClick={togglePlay}>
-              Play / Pause
-            </button>
-            <button type="button" onClick={() => seekBy(0.1)}>
-              +0.1s
-            </button>
-            <button type="button" onClick={() => seekBy(1)}>
-              +1s
-            </button>
+            <div className="transport-group" aria-label="Fine scrub">
+              <button type="button" onClick={() => seekBy(-1)}>
+                −1s
+              </button>
+              <button type="button" onClick={() => seekBy(-0.1)}>
+                −0.1s
+              </button>
+              <button type="button" className="primary" onClick={togglePlay}>
+                Play / Pause
+              </button>
+              <button type="button" onClick={() => seekBy(0.1)}>
+                +0.1s
+              </button>
+              <button type="button" onClick={() => seekBy(1)}>
+                +1s
+              </button>
+            </div>
+            <div className="transport-group" aria-label="Jump seek">
+              <button type="button" onClick={() => seekBy(-60)} title="Jump back 1 minute">
+                −1 min
+              </button>
+              <button type="button" onClick={() => seekBy(-10)} title="Jump back 10 seconds">
+                −10s
+              </button>
+              <button type="button" onClick={() => seekBy(10)} title="Jump forward 10 seconds">
+                +10s
+              </button>
+              <button type="button" onClick={() => seekBy(60)} title="Jump forward 1 minute">
+                +1 min
+              </button>
+            </div>
             <span className="time-readout">
               {formatTime(currentTime)}
               {duration > 0 ? ` / ${formatTime(duration)}` : ''}
