@@ -1,8 +1,8 @@
-# Action → outcome grid for volley-scout (v2.2)
+# Action → outcome grid for volley-scout (v2.3)
 # Flow-aware own-side scouting. See docs/scouting-flow.md
-# Setter quality is DERIVED from pass (reception/dig) + attack outcomes — not logged on set.
+# Setter quality is DERIVED from pass (reception/dig) + attack outcomes — not graded on second_touch in/out.
 
-version: "2.2"
+version: "2.3"
 schema: action_outcome_grid
 
 actions:
@@ -46,15 +46,16 @@ actions:
       - id: error
         label: Error
 
-  - id: set
-    label: Set
-    note: Only who set + when. In/out of system comes from prior pass; set quality from following attack.
+  - id: second_touch
+    label: Second touch
+    note: Second team contact after reception/dig. In/out of system comes from prior pass; quality from following attack.
     outcomes:
       - id: set
         label: Set
-      - id: error
-        label: Error
-        note: Double, catch, net, etc. on the setter
+        note: Intentional set to a hitter
+      - id: save
+        label: Save
+        note: Emergency second touch to keep the ball playable
 
   - id: attack
     label: Attack
