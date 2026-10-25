@@ -9,9 +9,9 @@ export function formatTime(seconds: number): string {
 }
 
 export function playerLabel(
-  player: { name: string; number?: string } | undefined,
+  player: { name: string } | undefined,
   fallback = 'Unknown',
 ): string {
   if (!player) return fallback
-  return player.number ? `#${player.number} ${player.name}` : player.name
+  return player.name
 }

@@ -2,6 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ACTION_OUTCOME_GRID, labelForAction, labelForOutcome } from './data/grid'
 import { formatTime, playerLabel } from './format'
 import {
+  applyPossessionChange,
+  playerAt,
+  positionOf,
+  positionsFromRoster,
+  possessionAfterEvent,
+  rotateClockwise,
+} from './rotation'
+import {
   emptySession,
   exportSessionJson,
   loadSession,
@@ -9,8 +17,30 @@ import {
   parseImportedSession,
   saveSession,
 } from './storage'
-import type { MatchSession, RosterPlayer, ScoutEvent } from './types'
+import { suggestNext } from './suggestions'
+import type {
+  CourtPosition,
+  FlowSuggestion,
+  MatchSession,
+  PlayerRole,
+  RosterPlayer,
+  ScoutEvent,
+  SuggestionOption,
+} from './types'
+import { COURT_POSITIONS, PLAYER_ROLES } from './types'
 import './App.css'
+
+type RosterDraft = {
+  name: string
+  role: '' | PlayerRole
+  startingPosition: '' | CourtPosition
+}
+
+const emptyDraft = (): RosterDraft => ({
+  name: '',
+  role: '',
+  startingPosition: '',
+})
 
 export default function App() {
   const [session, setSession] = useState<MatchSession>(() => loadSession())
@@ -22,11 +52,21 @@ export default function App() {
     ACTION_OUTCOME_GRID.actions[0]?.outcomes[0]?.id ?? 'ace',
   )
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [rosterDraft, setRosterDraft] = useState({ name: '', number: '' })
+  const [rosterDraft, setRosterDraft] = useState<RosterDraft>(emptyDraft)
   const [editPlayerId, setEditPlayerId] = useState<string | null>(null)
+  const [suggestion, setSuggestion] = useState<FlowSuggestion | null>(null)
+  /** Bumps on rotate so court slots re-animate. */
+  const [courtPulse, setCourtPulse] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const positionsSig = useMemo(
+    () => COURT_POSITIONS.map((p) => session.match.positions[p] ?? '').join('|'),
+    [session.match.positions],
+  )
+  useEffect(() => {
+    setCourtPulse((n) => n + 1)
+  }, [positionsSig])
 
   const outcomes = useMemo(() => {
     return ACTION_OUTCOME_GRID.actions.find((a) => a.id === actionId)?.outcomes ?? []
@@ -54,6 +94,17 @@ export default function App() {
 
   const currentPlayer = session.roster.find((p) => p.id === session.currentPlayerId)
 
+  const lastEvent = useMemo(() => {
+    if (session.events.length === 0) return null
+    return [...session.events].sort((a, b) => a.t - b.t).at(-1) ?? null
+  }, [session.events])
+
+  // Recompute suggestion when match/events change (not while editing an old event).
+  useEffect(() => {
+    if (editingId) return
+    setSuggestion(suggestNext(lastEvent, session.roster, session.match))
+  }, [lastEvent, session.roster, session.match, editingId])
+
   function onPickVideo(file: File | undefined) {
     if (!file) return
     if (videoUrl) URL.revokeObjectURL(videoUrl)
@@ -78,42 +129,95 @@ export default function App() {
   function addOrUpdatePlayer() {
     const name = rosterDraft.name.trim()
     if (!name) return
-    const number = rosterDraft.number.trim() || undefined
+    const role = rosterDraft.role || undefined
+    const startingPosition = rosterDraft.startingPosition || undefined
     if (editPlayerId) {
-      updateSession((s) => ({
-        ...s,
-        roster: s.roster.map((p) =>
-          p.id === editPlayerId ? { ...p, name, number } : p,
-        ),
-      }))
+      updateSession((s) => {
+        const roster = s.roster.map((p) =>
+          p.id === editPlayerId ? { ...p, name, role, startingPosition } : p,
+        )
+        return {
+          ...s,
+          roster,
+          match: {
+            ...s.match,
+            positions: mergeStartingIntoPositions(s.match.positions, roster, editPlayerId),
+          },
+        }
+      })
       setEditPlayerId(null)
     } else {
-      const player: RosterPlayer = { id: newId('pl'), name, number }
-      updateSession((s) => ({
-        ...s,
-        roster: [...s.roster, player],
-        currentPlayerId: s.currentPlayerId ?? player.id,
-      }))
+      const player: RosterPlayer = {
+        id: newId('pl'),
+        name,
+        role,
+        startingPosition,
+      }
+      updateSession((s) => {
+        const roster = [...s.roster, player]
+        const positions = { ...s.match.positions }
+        if (startingPosition) positions[startingPosition] = player.id
+        return {
+          ...s,
+          roster,
+          currentPlayerId: s.currentPlayerId ?? player.id,
+          match: { ...s.match, positions },
+        }
+      })
     }
-    setRosterDraft({ name: '', number: '' })
+    setRosterDraft(emptyDraft())
   }
 
   function startEditPlayer(player: RosterPlayer) {
     setEditPlayerId(player.id)
-    setRosterDraft({ name: player.name, number: player.number ?? '' })
+    setRosterDraft({
+      name: player.name,
+      role: player.role ?? '',
+      startingPosition: player.startingPosition ?? '',
+    })
   }
 
   function removePlayer(id: string) {
-    updateSession((s) => ({
-      ...s,
-      roster: s.roster.filter((p) => p.id !== id),
-      currentPlayerId: s.currentPlayerId === id ? null : s.currentPlayerId,
-      events: s.events.filter((e) => e.playerId !== id),
-    }))
+    updateSession((s) => {
+      const positions = { ...s.match.positions }
+      for (const pos of COURT_POSITIONS) {
+        if (positions[pos] === id) delete positions[pos]
+      }
+      return {
+        ...s,
+        roster: s.roster.filter((p) => p.id !== id),
+        currentPlayerId: s.currentPlayerId === id ? null : s.currentPlayerId,
+        events: s.events.filter((e) => e.playerId !== id),
+        match: { ...s.match, positions },
+      }
+    })
     if (editPlayerId === id) {
       setEditPlayerId(null)
-      setRosterDraft({ name: '', number: '' })
+      setRosterDraft(emptyDraft())
     }
+  }
+
+  function applyStartingLineup() {
+    updateSession((s) => ({
+      ...s,
+      match: { ...s.match, positions: positionsFromRoster(s.roster) },
+    }))
+  }
+
+  function rotateNow() {
+    updateSession((s) => ({
+      ...s,
+      match: { ...s.match, positions: rotateClockwise(s.match.positions) },
+    }))
+  }
+
+  function acceptSuggestion(option: SuggestionOption) {
+    if (option.playerId) {
+      updateSession((s) => ({ ...s, currentPlayerId: option.playerId }))
+    }
+    setActionId(option.action)
+    if (option.outcome) setOutcomeId(option.outcome)
+    setSuggestion(null)
   }
 
   function markEvent() {
@@ -146,16 +250,22 @@ export default function App() {
       source: 'human',
       status: 'accepted',
     }
-    updateSession((s) => ({
-      ...s,
-      events: [...s.events, event].sort((a, b) => a.t - b.t),
-    }))
+    updateSession((s) => {
+      const change = possessionAfterEvent(actionId, outcomeId, s.match.servingTeam)
+      const match = applyPossessionChange(s.match, change)
+      return {
+        ...s,
+        match,
+        events: [...s.events, event].sort((a, b) => a.t - b.t),
+      }
+    })
   }
 
   function loadEventForEdit(event: ScoutEvent) {
     setEditingId(event.id)
     setActionId(event.action)
     setOutcomeId(event.outcome)
+    setSuggestion(null)
     updateSession((s) => ({ ...s, currentPlayerId: event.playerId }))
     const v = videoRef.current
     if (v) v.currentTime = event.t
@@ -184,6 +294,7 @@ export default function App() {
         const next = parseImportedSession(String(reader.result))
         setSession(next)
         setEditingId(null)
+        setSuggestion(null)
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Import failed')
       }
@@ -195,6 +306,7 @@ export default function App() {
     if (!confirm('Clear roster and events from this browser?')) return
     setSession(emptySession())
     setEditingId(null)
+    setSuggestion(null)
   }
 
   useEffect(() => {
@@ -220,7 +332,6 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-    // markEvent closes over latest state via session refs in handlers above
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.currentPlayerId, actionId, outcomeId, editingId])
 
@@ -229,6 +340,10 @@ export default function App() {
     [session.events],
   )
 
+  const suggestionChips: SuggestionOption[] = suggestion
+    ? [suggestion.primary, ...suggestion.alternates]
+    : []
+
   return (
     <div className="app">
       <header className="topbar">
@@ -236,7 +351,7 @@ export default function App() {
           <span className="brand-mark" aria-hidden />
           <div>
             <h1>volley-scout</h1>
-            <p>Manual video mask · player → action → outcome</p>
+            <p>Own-side flow scout · player → action → outcome</p>
           </div>
         </div>
         <div className="top-actions">
@@ -316,6 +431,83 @@ export default function App() {
           <p className="hint">
             Keys: Space / K play-pause · J / L scrub (±0.1s, Shift ±1s) · ⌘/Ctrl+Enter mark event
           </p>
+
+          <section className="panel match-panel">
+            <div className="match-head">
+              <h2>Match · rotation</h2>
+              <div className="score-line">
+                <label>
+                  Us
+                  <input
+                    className="score-input"
+                    type="number"
+                    min={0}
+                    value={session.match.scoreUs}
+                    onChange={(e) =>
+                      updateSession((s) => ({
+                        ...s,
+                        match: { ...s.match, scoreUs: Number(e.target.value) || 0 },
+                      }))
+                    }
+                  />
+                </label>
+                <span className="score-sep">–</span>
+                <label>
+                  Them
+                  <input
+                    className="score-input"
+                    type="number"
+                    min={0}
+                    value={session.match.scoreThem}
+                    onChange={(e) =>
+                      updateSession((s) => ({
+                        ...s,
+                        match: { ...s.match, scoreThem: Number(e.target.value) || 0 },
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="serve-row">
+              <span className="muted">Serving</span>
+              <button
+                type="button"
+                className={session.match.servingTeam === 'us' ? 'primary' : 'ghost'}
+                onClick={() =>
+                  updateSession((s) => ({ ...s, match: { ...s.match, servingTeam: 'us' } }))
+                }
+              >
+                Us
+              </button>
+              <button
+                type="button"
+                className={session.match.servingTeam === 'them' ? 'primary' : 'ghost'}
+                onClick={() =>
+                  updateSession((s) => ({ ...s, match: { ...s.match, servingTeam: 'them' } }))
+                }
+              >
+                Them
+              </button>
+              <button type="button" className="ghost" onClick={rotateNow}>
+                Rotate
+              </button>
+              <button type="button" className="ghost" onClick={applyStartingLineup}>
+                Apply starting P1–P6
+              </button>
+            </div>
+            <CourtDiagram
+              session={session}
+              pulseKey={courtPulse}
+              onPick={(playerId) =>
+                updateSession((s) => ({ ...s, currentPlayerId: playerId }))
+              }
+            />
+            <p className="hint">
+              Our half · front P2–P4 / back P5–P6–P1 · P1 serves when we have serve. Attack
+              suggest: P4 outside, P2 opposite/outside, P3 middle. Auto-rotates on side-out.
+            </p>
+          </section>
         </section>
 
         <aside className="side">
@@ -328,13 +520,42 @@ export default function App() {
                 onChange={(e) => setRosterDraft((d) => ({ ...d, name: e.target.value }))}
                 onKeyDown={(e) => e.key === 'Enter' && addOrUpdatePlayer()}
               />
-              <input
-                className="num"
-                placeholder="#"
-                value={rosterDraft.number}
-                onChange={(e) => setRosterDraft((d) => ({ ...d, number: e.target.value }))}
-                onKeyDown={(e) => e.key === 'Enter' && addOrUpdatePlayer()}
-              />
+              <select
+                value={rosterDraft.role}
+                onChange={(e) =>
+                  setRosterDraft((d) => ({
+                    ...d,
+                    role: e.target.value as RosterDraft['role'],
+                  }))
+                }
+                aria-label="Role"
+              >
+                <option value="">Role</option>
+                {PLAYER_ROLES.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={rosterDraft.startingPosition}
+                onChange={(e) =>
+                  setRosterDraft((d) => ({
+                    ...d,
+                    startingPosition: e.target.value
+                      ? (Number(e.target.value) as CourtPosition)
+                      : '',
+                  }))
+                }
+                aria-label="Starting position"
+              >
+                <option value="">Start P</option>
+                {COURT_POSITIONS.map((p) => (
+                  <option key={p} value={p}>
+                    P{p}
+                  </option>
+                ))}
+              </select>
               <button type="button" className="primary" onClick={addOrUpdatePlayer}>
                 {editPlayerId ? 'Save' : 'Add'}
               </button>
@@ -344,7 +565,7 @@ export default function App() {
                   className="ghost"
                   onClick={() => {
                     setEditPlayerId(null)
-                    setRosterDraft({ name: '', number: '' })
+                    setRosterDraft(emptyDraft())
                   }}
                 >
                   Cancel
@@ -353,10 +574,13 @@ export default function App() {
             </div>
             <ul className="roster-list">
               {session.roster.length === 0 && (
-                <li className="muted">Add players, then select who is on the ball.</li>
+                <li className="muted">
+                  Add players (Setter / Outside / Opposite / Middle) + starting P1–P6.
+                </li>
               )}
               {session.roster.map((player) => {
                 const active = player.id === session.currentPlayerId
+                const pos = positionOf(session.match.positions, player.id)
                 return (
                   <li key={player.id} className={active ? 'active' : undefined}>
                     <button
@@ -366,8 +590,11 @@ export default function App() {
                         updateSession((s) => ({ ...s, currentPlayerId: player.id }))
                       }
                     >
-                      <span className="jersey">{player.number ? `#${player.number}` : '—'}</span>
                       <span>{player.name}</span>
+                      {player.role && (
+                        <span className="meta-chip">{roleLabel(player.role)}</span>
+                      )}
+                      {pos && <span className="meta-chip">P{pos}</span>}
                       {active && <span className="badge">current</span>}
                     </button>
                     <div className="row-actions">
@@ -390,6 +617,32 @@ export default function App() {
 
           <section className="panel entry">
             <h2>{editingId ? 'Edit event' : 'Mark event'}</h2>
+            {!editingId && suggestionChips.length > 0 && (
+              <div className="suggest-panel" aria-live="polite">
+                <div className="suggest-label">Suggested next</div>
+                <div className="suggest-chips">
+                  {suggestionChips.map((opt, i) => {
+                    const player = session.roster.find((p) => p.id === opt.playerId)
+                    return (
+                      <button
+                        key={`${opt.action}-${opt.playerId ?? 'any'}-${i}`}
+                        type="button"
+                        className={i === 0 ? 'suggest-chip primary-chip' : 'suggest-chip'}
+                        onClick={() => acceptSuggestion(opt)}
+                        title={opt.reason}
+                      >
+                        <span className="suggest-main">
+                          {playerLabel(player, opt.playerId ? 'Unknown' : 'Any')} ·{' '}
+                          {labelForAction(opt.action)}
+                          {opt.outcome ? ` → ${labelForOutcome(opt.action, opt.outcome)}` : ''}
+                        </span>
+                        <span className="suggest-reason">{opt.reason}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             <p className="current-line">
               Player:{' '}
               <strong>{playerLabel(currentPlayer, 'select a player')}</strong>
@@ -454,7 +707,8 @@ export default function App() {
                       <span className="t">{formatTime(event.t)}</span>
                       <span className="who">{playerLabel(player)}</span>
                       <span className="what">
-                        {labelForAction(event.action)} → {labelForOutcome(event.action, event.outcome)}
+                        {labelForAction(event.action)} →{' '}
+                        {labelForOutcome(event.action, event.outcome)}
                       </span>
                       <span className="src">{event.source}</span>
                     </button>
@@ -479,4 +733,151 @@ export default function App() {
       </main>
     </div>
   )
+}
+
+function roleLabel(role: PlayerRole): string {
+  return PLAYER_ROLES.find((r) => r.id === role)?.label ?? role
+}
+
+function roleShort(role: PlayerRole | undefined): string {
+  if (!role) return ''
+  if (role === 'setter') return 'S'
+  if (role === 'outside') return 'OH'
+  if (role === 'opposite') return 'OPP'
+  return 'MB'
+}
+
+function CourtDiagram({
+  session,
+  pulseKey,
+  onPick,
+}: {
+  session: MatchSession
+  pulseKey: number
+  onPick: (playerId: string) => void
+}) {
+  const weServe = session.match.servingTeam === 'us'
+  return (
+    <div className="court-wrap" aria-label="Our side court positions P1–P6">
+      <div className="court-banner">
+        <span>Our side</span>
+        <span className={weServe ? 'serve-pill on' : 'serve-pill'}>
+          {weServe ? 'We serve · P1' : 'They serve'}
+        </span>
+      </div>
+      <div className="court" data-pulse={pulseKey}>
+        <svg className="court-lines" viewBox="0 0 300 220" aria-hidden>
+          <rect x="8" y="8" width="284" height="204" rx="4" className="court-outline" />
+          <line x1="8" y1="18" x2="292" y2="18" className="court-net-line" />
+          <text x="150" y="14" textAnchor="middle" className="court-svg-label">
+            Net
+          </text>
+          {/* Attack line between front and back */}
+          <line x1="8" y1="112" x2="292" y2="112" className="court-attack-line" />
+          <text x="16" y="106" className="court-svg-label muted-svg">
+            Attack line
+          </text>
+          <text x="16" y="40" className="court-svg-label muted-svg">
+            Front
+          </text>
+          <text x="16" y="200" className="court-svg-label muted-svg">
+            Back
+          </text>
+        </svg>
+        <div className="court-slots">
+          <div className="court-row front" aria-label="Front row P4 P3 P2">
+            {([4, 3, 2] as CourtPosition[]).map((pos) => (
+              <CourtSlot
+                key={`${pos}-${pulseKey}`}
+                pos={pos}
+                row="front"
+                session={session}
+                onPick={onPick}
+              />
+            ))}
+          </div>
+          <div className="court-row back" aria-label="Back row P5 P6 P1">
+            {([5, 6, 1] as CourtPosition[]).map((pos) => (
+              <CourtSlot
+                key={`${pos}-${pulseKey}`}
+                pos={pos}
+                row="back"
+                session={session}
+                onPick={onPick}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="court-legend">
+        <span>
+          <i className="leg front" /> Front P2–P4
+        </span>
+        <span>
+          <i className="leg back" /> Back P5–P6–P1
+        </span>
+        <span>
+          <i className="leg server" /> Server
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function CourtSlot({
+  pos,
+  row,
+  session,
+  onPick,
+}: {
+  pos: CourtPosition
+  row: 'front' | 'back'
+  session: MatchSession
+  onPick: (playerId: string) => void
+}) {
+  const playerId = playerAt(session.match.positions, pos)
+  const player = session.roster.find((p) => p.id === playerId)
+  const isServer = session.match.servingTeam === 'us' && pos === 1
+  return (
+    <button
+      type="button"
+      className={[
+        'court-slot',
+        row,
+        isServer ? 'server' : '',
+        playerId === session.currentPlayerId ? 'active' : '',
+        playerId ? '' : 'empty',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      onClick={() => playerId && onPick(playerId)}
+      disabled={!playerId}
+      title={player ? `${playerLabel(player)}${player.role ? ` · ${roleLabel(player.role)}` : ''}` : `P${pos} empty`}
+    >
+      <span className="slot-top">
+        <span className="slot-pos">P{pos}</span>
+        {isServer && <span className="server-tag">Serve</span>}
+        {player?.role && <span className="slot-role">{roleShort(player.role)}</span>}
+      </span>
+      <span className="slot-body">
+        <span className="slot-name">{player ? player.name : '—'}</span>
+      </span>
+    </button>
+  )
+}
+
+/** Keep live positions in sync when editing a player's starting slot. */
+function mergeStartingIntoPositions(
+  positions: MatchSession['match']['positions'],
+  roster: RosterPlayer[],
+  editedId: string,
+): MatchSession['match']['positions'] {
+  const edited = roster.find((p) => p.id === editedId)
+  if (!edited?.startingPosition) return positions
+  const next = { ...positions }
+  for (const pos of COURT_POSITIONS) {
+    if (next[pos] === editedId) delete next[pos]
+  }
+  next[edited.startingPosition] = editedId
+  return next
 }

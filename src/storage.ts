@@ -1,56 +1,136 @@
-import type { MatchSession, ScoutEvent, RosterPlayer } from './types'
+import { defaultSession } from './defaultRoster'
+import { emptyMatchState, positionsFromRoster } from './rotation'
+import type {
+  CourtPosition,
+  MatchSession,
+  MatchState,
+  PlayerRole,
+  RosterPlayer,
+  ScoutEvent,
+} from './types'
+import { LEGACY_ROLE_MAP } from './types'
 
-const STORAGE_KEY = 'volley-scout:session:v1'
+const STORAGE_KEY = 'volley-scout:session:v2'
+const LEGACY_STORAGE_KEY = 'volley-scout:session:v1'
 
-export function emptySession(): MatchSession {
+const ROLES = new Set<PlayerRole>(['setter', 'outside', 'opposite', 'middle'])
+
+function isCourtPosition(n: unknown): n is CourtPosition {
+  return n === 1 || n === 2 || n === 3 || n === 4 || n === 5 || n === 6
+}
+
+function normalizeRole(raw: unknown): PlayerRole | undefined {
+  if (typeof raw !== 'string') return undefined
+  const mapped = LEGACY_ROLE_MAP[raw] ?? (ROLES.has(raw as PlayerRole) ? (raw as PlayerRole) : undefined)
+  return mapped && ROLES.has(mapped) ? mapped : undefined
+}
+
+function normalizePlayer(raw: Partial<RosterPlayer> & { id: string; name: string }): RosterPlayer {
+  const role = normalizeRole(raw.role)
+  const startingPosition = isCourtPosition(raw.startingPosition)
+    ? raw.startingPosition
+    : undefined
   return {
-    version: 1,
-    videoName: null,
-    roster: [],
-    bindings: [],
-    currentPlayerId: null,
-    events: [],
+    id: raw.id,
+    name: raw.name,
+    role,
+    startingPosition,
+  }
+}
+
+function normalizeMatch(raw: Partial<MatchState> | undefined, roster: RosterPlayer[]): MatchState {
+  const base = emptyMatchState()
+  if (!raw || typeof raw !== 'object') {
+    return { ...base, positions: positionsFromRoster(roster) }
+  }
+  const positions: Partial<Record<CourtPosition, string>> = {}
+  if (raw.positions && typeof raw.positions === 'object') {
+    for (const [k, v] of Object.entries(raw.positions)) {
+      const pos = Number(k)
+      if (isCourtPosition(pos) && typeof v === 'string') positions[pos] = v
+    }
+  }
+  if (Object.keys(positions).length === 0) {
+    Object.assign(positions, positionsFromRoster(roster))
+  }
+  return {
+    positions,
+    servingTeam: raw.servingTeam === 'them' ? 'them' : 'us',
+    scoreUs: typeof raw.scoreUs === 'number' ? raw.scoreUs : 0,
+    scoreThem: typeof raw.scoreThem === 'number' ? raw.scoreThem : 0,
+  }
+}
+
+function normalizeSession(parsed: Record<string, unknown>): MatchSession {
+  const rosterRaw = Array.isArray(parsed.roster) ? parsed.roster : []
+  const roster = rosterRaw
+    .filter((p): p is Partial<RosterPlayer> & { id: string; name: string } =>
+      Boolean(p && typeof p === 'object' && typeof (p as RosterPlayer).id === 'string' && typeof (p as RosterPlayer).name === 'string'),
+    )
+    .map(normalizePlayer)
+
+  return {
+    version: 2,
+    videoName: typeof parsed.videoName === 'string' ? parsed.videoName : null,
+    roster,
+    bindings: Array.isArray(parsed.bindings) ? (parsed.bindings as MatchSession['bindings']) : [],
+    currentPlayerId: typeof parsed.currentPlayerId === 'string' ? parsed.currentPlayerId : null,
+    events: Array.isArray(parsed.events) ? (parsed.events as ScoutEvent[]) : [],
+    match: normalizeMatch(parsed.match as Partial<MatchState> | undefined, roster),
     updatedAt: new Date().toISOString(),
   }
 }
 
+/** Fresh session with default six + court positions filled. */
+export function emptySession(): MatchSession {
+  return defaultSession()
+}
+
 export function loadSession(): MatchSession {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
     if (!raw) return emptySession()
-    const parsed = JSON.parse(raw) as MatchSession
-    if (parsed?.version !== 1 || !Array.isArray(parsed.roster) || !Array.isArray(parsed.events)) {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!parsed || !Array.isArray(parsed.roster) || !Array.isArray(parsed.events)) {
       return emptySession()
     }
-    return parsed
+    const session = normalizeSession(parsed)
+    // Migrate legacy key forward (also strips jersey numbers on save)
+    if (!localStorage.getItem(STORAGE_KEY)) {
+      saveSession(session)
+    }
+    return session
   } catch {
     return emptySession()
   }
 }
 
 export function saveSession(session: MatchSession): void {
-  const next = { ...session, updatedAt: new Date().toISOString() }
+  const next = { ...session, version: 2 as const, updatedAt: new Date().toISOString() }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
 }
 
 export function exportSessionJson(session: MatchSession): string {
-  return JSON.stringify({ ...session, updatedAt: new Date().toISOString() }, null, 2)
+  const cleaned: MatchSession = {
+    ...session,
+    version: 2,
+    roster: session.roster.map(({ id, name, role, startingPosition }) => ({
+      id,
+      name,
+      role,
+      startingPosition,
+    })),
+    updatedAt: new Date().toISOString(),
+  }
+  return JSON.stringify(cleaned, null, 2)
 }
 
 export function parseImportedSession(text: string): MatchSession {
-  const parsed = JSON.parse(text) as MatchSession
-  if (parsed?.version !== 1 || !Array.isArray(parsed.roster) || !Array.isArray(parsed.events)) {
-    throw new Error('Invalid session JSON (expected version 1 with roster + events)')
+  const parsed = JSON.parse(text) as Record<string, unknown>
+  if (!parsed || !Array.isArray(parsed.roster) || !Array.isArray(parsed.events)) {
+    throw new Error('Invalid session JSON (expected roster + events)')
   }
-  return {
-    version: 1,
-    videoName: parsed.videoName ?? null,
-    roster: parsed.roster as RosterPlayer[],
-    bindings: Array.isArray(parsed.bindings) ? parsed.bindings : [],
-    currentPlayerId: parsed.currentPlayerId ?? null,
-    events: parsed.events as ScoutEvent[],
-    updatedAt: new Date().toISOString(),
-  }
+  return normalizeSession(parsed)
 }
 
 export function newId(prefix: string): string {
