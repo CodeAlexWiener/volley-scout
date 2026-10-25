@@ -86,22 +86,60 @@ export function emptySession(): MatchSession {
   return defaultSession()
 }
 
+/**
+ * Ensure a usable roster/court: empty → default six; missing positions → from startingPosition.
+ * Persists when we rewrite so the next load is not empty again.
+ */
+function ensureDefaultRoster(session: MatchSession): MatchSession {
+  if (session.roster.length === 0) {
+    const defaults = defaultSession()
+    saveSession(defaults)
+    return defaults
+  }
+
+  const positionCount = Object.keys(session.match.positions).length
+  if (positionCount === 0) {
+    const fromStarting = positionsFromRoster(session.roster)
+    if (Object.keys(fromStarting).length === 0) {
+      const defaults = defaultSession()
+      saveSession(defaults)
+      return defaults
+    }
+    const next: MatchSession = {
+      ...session,
+      match: { ...session.match, positions: fromStarting },
+      currentPlayerId: session.currentPlayerId ?? session.roster[0]?.id ?? null,
+    }
+    saveSession(next)
+    return next
+  }
+
+  return session
+}
+
 export function loadSession(): MatchSession {
   try {
     const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
-    if (!raw) return emptySession()
+    if (!raw) {
+      const defaults = defaultSession()
+      saveSession(defaults)
+      return defaults
+    }
     const parsed = JSON.parse(raw) as Record<string, unknown>
     if (!parsed || !Array.isArray(parsed.roster) || !Array.isArray(parsed.events)) {
-      return emptySession()
+      const defaults = defaultSession()
+      saveSession(defaults)
+      return defaults
     }
-    const session = normalizeSession(parsed)
-    // Migrate legacy key forward (also strips jersey numbers on save)
+    const session = ensureDefaultRoster(normalizeSession(parsed))
     if (!localStorage.getItem(STORAGE_KEY)) {
       saveSession(session)
     }
     return session
   } catch {
-    return emptySession()
+    const defaults = defaultSession()
+    saveSession(defaults)
+    return defaults
   }
 }
 
@@ -130,7 +168,7 @@ export function parseImportedSession(text: string): MatchSession {
   if (!parsed || !Array.isArray(parsed.roster) || !Array.isArray(parsed.events)) {
     throw new Error('Invalid session JSON (expected roster + events)')
   }
-  return normalizeSession(parsed)
+  return ensureDefaultRoster(normalizeSession(parsed))
 }
 
 export function newId(prefix: string): string {

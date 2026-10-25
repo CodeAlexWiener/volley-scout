@@ -9,8 +9,8 @@ import {
   possessionAfterEvent,
   rotateClockwise,
 } from './rotation'
+import { defaultSession } from './defaultRoster'
 import {
-  emptySession,
   exportSessionJson,
   loadSession,
   newId,
@@ -302,11 +302,21 @@ export default function App() {
     reader.readAsText(file)
   }
 
-  function clearSession() {
-    if (!confirm('Clear roster and events from this browser?')) return
-    setSession(emptySession())
+  function resetToDefaultRoster() {
+    if (
+      !confirm(
+        'Reset to the default six (Peter, Julia, Manu, Alex, Lucas, Kathi) and clear events?',
+      )
+    ) {
+      return
+    }
+    const next = defaultSession()
+    saveSession(next)
+    setSession(next)
     setEditingId(null)
     setSuggestion(null)
+    setRosterDraft(emptyDraft())
+    setEditPlayerId(null)
   }
 
   useEffect(() => {
@@ -378,8 +388,8 @@ export default function App() {
             hidden
             onChange={(e) => onImportFile(e.target.files?.[0])}
           />
-          <button type="button" className="ghost danger" onClick={clearSession}>
-            Clear
+          <button type="button" className="ghost danger" onClick={resetToDefaultRoster}>
+            Reset roster
           </button>
         </div>
       </header>
@@ -528,7 +538,12 @@ export default function App() {
 
         <aside className="side">
           <section className="panel">
-            <h2>Roster</h2>
+            <div className="panel-head">
+              <h2>Roster</h2>
+              <button type="button" className="ghost" onClick={resetToDefaultRoster}>
+                Reset roster
+              </button>
+            </div>
             <div className="roster-form">
               <input
                 placeholder="Name"
