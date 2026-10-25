@@ -1,11 +1,11 @@
 import type { ActionOutcomeGrid } from '../types'
 
 /**
- * In-app copy of data/action-outcome-grid.yaml (v2.2).
+ * In-app copy of data/action-outcome-grid.yaml (v2.3).
  * Keep in sync when editing the YAML source of truth.
  */
 export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
-  version: '2.2',
+  version: '2.3',
   schema: 'action_outcome_grid',
   actions: [
     {
@@ -49,12 +49,12 @@ export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
       ],
     },
     {
-      id: 'set',
-      label: 'Set',
-      note: 'Only who set + when. In/out of system comes from prior pass; set quality from following attack.',
+      id: 'second_touch',
+      label: 'Second touch',
+      note: 'Second team contact after reception/dig. In/out of system comes from prior pass; quality from following attack.',
       outcomes: [
-        { id: 'set', label: 'Set' },
-        { id: 'error', label: 'Error', note: 'Double, catch, net, etc. on the setter' },
+        { id: 'set', label: 'Set', note: 'Intentional set to a hitter' },
+        { id: 'save', label: 'Save', note: 'Emergency second touch to keep the ball playable' },
       ],
     },
     {

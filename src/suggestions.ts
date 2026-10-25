@@ -51,25 +51,26 @@ function suggestReception(roster: RosterPlayer[], match: MatchState, reason: str
   }
 }
 
-function passToSet(
+function passToSecondTouch(
   outcome: string,
   roster: RosterPlayer[],
   match: MatchState,
   kind: 'reception' | 'dig',
 ): FlowSuggestion {
   const label = kind === 'reception' ? 'Reception' : 'Dig'
-  // Set is not graded in/out — only suggest who sets; outcome stays unset (user picks set|error).
   if (outcome === 'in_system') {
     const setter = findSetterId(roster) ?? preferBackRowReceiver(roster, match.positions)
     return {
-      primary: opt(setter, 'set', null, `${label} in system → setter set`),
+      primary: opt(setter, 'second_touch', 'set', `${label} in system → setter set`),
       alternates: [],
     }
   }
   if (outcome === 'out_of_system') {
     return {
-      primary: opt(null, 'set', null, `${label} out of system → set (any)`),
-      alternates: [],
+      primary: opt(null, 'second_touch', 'save', `${label} out of system → save (any)`),
+      alternates: [
+        opt(findSetterId(roster), 'second_touch', 'set', 'Or still try a set'),
+      ].filter((o) => o.playerId),
     }
   }
   if (outcome === 'overpass') {
@@ -80,7 +81,6 @@ function passToSet(
       'Overpass — block if they attack',
     )
   }
-  // error: point against us (after applyPossessionChange, servingTeam is them unless rare)
   if (match.servingTeam === 'us') {
     return suggestServe(roster, match, `${label} error but we serve — P1`)
   }
@@ -128,17 +128,24 @@ export function suggestNext(
   }
 
   if (action === 'reception' || action === 'dig') {
-    return passToSet(outcome, roster, match, action)
+    return passToSecondTouch(outcome, roster, match, action)
   }
 
-  if (action === 'set') {
-    if (outcome === 'error') {
-      if (match.servingTeam === 'us') {
-        return suggestServe(roster, match, 'Set error but we serve')
+  if (action === 'second_touch' || action === 'set') {
+    if (outcome === 'save') {
+      return {
+        primary: opt(playerId, 'freeball_send', null, 'Save — often freeball send'),
+        alternates: [
+          opt(
+            preferFrontRowHitter(roster, match.positions),
+            'attack',
+            null,
+            'Or attack if still hittable',
+          ),
+        ],
       }
-      return suggestReception(roster, match, 'Set error → reception')
     }
-    // P4 outside → P2 opposite/outside → P3 middle (see ATTACK_SLOT_ROLES)
+    // set (or legacy) → attack; dump still available for setter
     const hitter = preferFrontRowHitter(roster, match.positions)
     const setter = findSetterId(roster) ?? playerId
     return {
