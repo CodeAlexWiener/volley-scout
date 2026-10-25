@@ -26,8 +26,28 @@ export type RosterPlayer = {
 export type EventSource = 'human' | 'ai'
 export type EventStatus = 'proposed' | 'accepted' | 'rejected'
 
+/**
+ * Sentinel for opponent_error events (no roster player).
+ * Prefer {@link isOpponentPlayerId} / {@link OPPONENT_PLAYER} over comparing raw strings.
+ */
+export const OPPONENT_PLAYER_ID = '__opponent__'
+
+export function isOpponentPlayerId(id: string | null | undefined): boolean {
+  return id === OPPONENT_PLAYER_ID
+}
+
+/** Synthetic grid / log person for opponent_error (not on the roster). */
+export const OPPONENT_PLAYER: RosterPlayer = {
+  id: OPPONENT_PLAYER_ID,
+  name: 'Opponent',
+}
+
 export type ScoutEvent = {
   id: string
+  /**
+   * Roster player id, or {@link OPPONENT_PLAYER_ID} when action is `opponent_error`
+   * (no our touch / no roster person).
+   */
   playerId: string
   action: string
   outcome: string
@@ -80,7 +100,7 @@ export type GridAction = {
 }
 
 export type ActionOutcomeGrid = {
-  /** Grid revision, e.g. `"2.4"`. */
+  /** Grid revision, e.g. `"2.5"`. */
   version: number | string
   schema: string
   actions: GridAction[]

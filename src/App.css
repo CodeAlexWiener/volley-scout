@@ -741,6 +741,22 @@ button.wide {
   color: var(--ink);
 }
 
+.scout-grid thead th.opp-col {
+  color: color-mix(in oklab, var(--sand) 80%, var(--muted));
+}
+
+.scout-grid tr.opponent-row .player-col {
+  font-style: italic;
+  color: var(--sand);
+  font-weight: 700;
+}
+
+.scout-cell.unavailable {
+  opacity: 0.22;
+  cursor: default;
+  background: transparent;
+}
+
 .scout-cell {
   min-width: 1.85rem;
   min-height: 1.85rem;

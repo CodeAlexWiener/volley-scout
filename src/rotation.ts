@@ -222,6 +222,11 @@ export function possessionAfterEvent(
     return { kind: 'rally_continues' }
   }
 
+  // Opponent ends rally with no our touch — we score
+  if (action === 'opponent_error') {
+    return servingTeam === 'us' ? { kind: 'we_keep_serve' } : { kind: 'we_gain_serve' }
+  }
+
   return { kind: 'rally_continues' }
 }
 

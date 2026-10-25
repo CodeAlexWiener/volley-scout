@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getCandidateGrid, resolveFocus } from './candidates'
+import {
+  getCandidateGrid,
+  isCellEnabled,
+  moveFocusSkippingDisabled,
+  resolveFocus,
+} from './candidates'
 import type { FocusCell, GridColumn } from './candidates'
 import { ACTION_OUTCOME_GRID, labelForAction, labelForOutcome } from './data/grid'
-import { formatTime, playerLabel } from './format'
+import { formatTime, playerLabel, resolveEventPlayer } from './format'
 import {
   applyPossessionChange,
   playerAt,
@@ -30,7 +35,12 @@ import type {
   ScoutEvent,
   SuggestionOption,
 } from './types'
-import { COURT_POSITIONS, PLAYER_ROLES } from './types'
+import {
+  COURT_POSITIONS,
+  isOpponentPlayerId,
+  OPPONENT_PLAYER_ID,
+  PLAYER_ROLES,
+} from './types'
 import './App.css'
 
 type UndoSnapshot = {
@@ -272,11 +282,13 @@ export default function App() {
   function logCell(playerId: string, action: string, outcome: string): boolean {
     if (editingId) return false
     if (!playerId || !action || !outcome) return false
+    if (action === 'opponent_error' && !isOpponentPlayerId(playerId)) return false
+    if (action !== 'opponent_error' && isOpponentPlayerId(playerId)) return false
 
     const t = videoRef.current?.currentTime ?? currentTime
     const event: ScoutEvent = {
       id: newId('ev'),
-      playerId,
+      playerId: action === 'opponent_error' ? OPPONENT_PLAYER_ID : playerId,
       action,
       outcome,
       t,
@@ -289,7 +301,10 @@ export default function App() {
       const match = applyPossessionChange(s.match, change)
       return {
         ...s,
-        currentPlayerId: playerId,
+        // Don't bind "current player" to the synthetic Opponent sentinel
+        currentPlayerId: isOpponentPlayerId(event.playerId)
+          ? s.currentPlayerId
+          : event.playerId,
         match,
         events: [...s.events, event].sort((a, b) => a.t - b.t),
       }
@@ -315,10 +330,12 @@ export default function App() {
     const player = candidateGrid.players[gridFocus.rowIndex]
     const column = candidateGrid.columns[gridFocus.columnIndex]
     if (!player || !column) return false
+    if (!isCellEnabled(player.id, column)) return false
     return logCell(player.id, column.action, column.outcome)
   }
 
   function onGridLog(player: RosterPlayer, column: GridColumn) {
+    if (!isCellEnabled(player.id, column)) return
     logCell(player.id, column.action, column.outcome)
   }
 
@@ -351,11 +368,7 @@ export default function App() {
     setGridActive(true)
     setGridFocus((prev) => {
       const base = prev ?? resolveFocus(candidateGrid, null) ?? { rowIndex: 0, columnIndex: 0 }
-      const rowIndex =
-        (base.rowIndex + dRow + candidateGrid.players.length) % candidateGrid.players.length
-      const columnIndex =
-        (base.columnIndex + dCol + candidateGrid.columns.length) % candidateGrid.columns.length
-      return { rowIndex, columnIndex }
+      return moveFocusSkippingDisabled(candidateGrid, base, dRow, dCol)
     })
   }
 
@@ -368,7 +381,9 @@ export default function App() {
   }
 
   function markEvent() {
-    if (!session.currentPlayerId || !actionId || !outcomeId) return
+    const isOppErr = actionId === 'opponent_error'
+    const playerId = isOppErr ? OPPONENT_PLAYER_ID : session.currentPlayerId
+    if (!playerId || !actionId || !outcomeId) return
     const t = videoRef.current?.currentTime ?? currentTime
     if (editingId) {
       updateSession((s) => ({
@@ -377,20 +392,21 @@ export default function App() {
           e.id === editingId
             ? {
                 ...e,
-                playerId: session.currentPlayerId!,
+                playerId,
                 action: actionId,
                 outcome: outcomeId,
                 t,
               }
             : e,
         ),
+        currentPlayerId: isOppErr ? s.currentPlayerId : playerId,
       }))
       setEditingId(null)
       return
     }
     const event: ScoutEvent = {
       id: newId('ev'),
-      playerId: session.currentPlayerId,
+      playerId,
       action: actionId,
       outcome: outcomeId,
       t,
@@ -414,7 +430,9 @@ export default function App() {
     setActionId(event.action)
     setOutcomeId(event.outcome)
     setSuggestion(null)
-    updateSession((s) => ({ ...s, currentPlayerId: event.playerId }))
+    if (!isOpponentPlayerId(event.playerId)) {
+      updateSession((s) => ({ ...s, currentPlayerId: event.playerId }))
+    }
     const v = videoRef.current
     if (v) v.currentTime = event.t
   }
@@ -915,7 +933,9 @@ export default function App() {
               <button
                 type="button"
                 className="primary wide"
-                disabled={!session.currentPlayerId}
+                disabled={
+                  actionId === 'opponent_error' ? !outcomeId : !session.currentPlayerId
+                }
                 onClick={markEvent}
               >
                 {editingId ? 'Update event' : 'Mark at playhead'}
@@ -935,7 +955,7 @@ export default function App() {
                 <li className="muted">No events yet — scrub and mark touches.</li>
               )}
               {sortedEvents.map((event) => {
-                const player = session.roster.find((p) => p.id === event.playerId)
+                const player = resolveEventPlayer(event.playerId, session.roster)
                 return (
                   <li key={event.id} className={editingId === event.id ? 'editing' : undefined}>
                     <button

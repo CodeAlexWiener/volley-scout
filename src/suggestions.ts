@@ -231,5 +231,9 @@ export function suggestNext(
     )
   }
 
+  if (action === 'opponent_error') {
+    return suggestServe(roster, match, 'Opponent error — we serve (P1 after rotate if side-out)')
+  }
+
   return null
 }
