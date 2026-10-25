@@ -473,34 +473,29 @@ export default function App() {
     function onKey(e: KeyboardEvent) {
       if (isTypingTarget(e.target)) return
 
-      // Video seek — letter keys (ovscout2-style) or Alt+arrows; plain arrows stay on grid
-      if (e.key === 'j' || e.key === 'J') {
+      // Video seek — B/N ±5s, V/M ±1min; plain arrows stay on the scout grid
+      if (e.key === 'b' || e.key === 'B') {
         e.preventDefault()
-        seekBy(-10)
+        seekBy(-5)
         return
       }
-      if (e.key === 'l' || e.key === 'L') {
+      if (e.key === 'n' || e.key === 'N') {
         e.preventDefault()
-        seekBy(10)
+        seekBy(5)
         return
       }
-      if (e.key === 'h' || e.key === 'H') {
+      if (e.key === 'v' || e.key === 'V') {
         e.preventDefault()
         seekBy(-60)
         return
       }
-      if (e.key === ';') {
+      if (e.key === 'm' || e.key === 'M') {
         e.preventDefault()
         seekBy(60)
         return
       }
-      if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-        e.preventDefault()
-        seekBy(e.key === 'ArrowLeft' ? -10 : 10)
-        return
-      }
 
-      if (e.code === 'Space' || e.key === 'k' || e.key === 'K') {
+      if (e.code === 'Space') {
         e.preventDefault()
         togglePlay()
         return
@@ -686,7 +681,7 @@ export default function App() {
           </div>
           <p className="hint">
             Grid: ←→↑↓ · Enter log · Tab primary · Esc clear · Backspace/U undo · Space
-            play/pause · Seek J/L ±10s · H/; ±1min · Alt+←→ ±10s · ⌘/Ctrl+Enter mark form
+            play/pause · Seek B/N ±5s · V/M ±1min · ⌘/Ctrl+Enter mark form
           </p>
 
           <section className="panel match-panel">
