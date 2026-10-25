@@ -15,6 +15,7 @@ import type {
   ScoutEvent,
   SuggestionOption,
 } from './types'
+import { isOpponentPlayerId, OPPONENT_PLAYER } from './types'
 
 export type GridColumn = {
   action: string
@@ -63,8 +64,39 @@ function shortOutcomeLabel(actionId: string, outcomeId: string): string {
     recycle: 'Recyc',
     block_error: 'Err',
     in_play: 'In',
+    out: 'Out',
+    net: 'Net',
+    other: 'Other',
   }
   return map[outcomeId] ?? full
+}
+
+/** Opponent × opponent_error cells only; roster players never use opponent_error columns. */
+export function isCellEnabled(playerId: string, column: GridColumn): boolean {
+  const isOpp = isOpponentPlayerId(playerId)
+  const isOppErr = column.action === 'opponent_error'
+  return isOpp === isOppErr
+}
+
+function opponentErrorColumns(): GridColumn[] {
+  return columnsForActions(['opponent_error'])
+}
+
+/** Always offer Opponent × opponent_error as an escape hatch on the matrix. */
+function withOpponentEscapeHatch(
+  players: RosterPlayer[],
+  columns: GridColumn[],
+): { players: RosterPlayer[]; columns: GridColumn[] } {
+  const nextColumns = [...columns]
+  for (const col of opponentErrorColumns()) {
+    if (!nextColumns.some((c) => c.action === col.action && c.outcome === col.outcome)) {
+      nextColumns.push(col)
+    }
+  }
+  const nextPlayers = players.some((p) => isOpponentPlayerId(p.id))
+    ? players
+    : [...players, OPPONENT_PLAYER]
+  return { players: nextPlayers, columns: nextColumns }
 }
 
 function columnsForActions(actionIds: string[]): GridColumn[] {
@@ -255,6 +287,19 @@ export function getCandidateGrid(
 ): CandidateGrid {
   const suggestion = suggestNext(last, roster, match)
   if (!suggestion || roster.length === 0) {
+    // Still offer Opponent escape hatch when roster exists but suggestion is null
+    if (roster.length > 0) {
+      const { players, columns } = withOpponentEscapeHatch([], [])
+      return {
+        players,
+        columns,
+        defaultFocus: players[0]
+          ? { playerId: players[0].id, columnIndex: 0 }
+          : null,
+        reason: 'Opponent error escape hatch',
+        suggestion: null,
+      }
+    }
     return {
       players: [],
       columns: [],
@@ -265,8 +310,9 @@ export function getCandidateGrid(
   }
 
   const options = [suggestion.primary, ...suggestion.alternates]
-  const columns = columnsForActions(options.map((o) => o.action))
-  const players = mergePlayers(options, roster, match)
+  const baseColumns = columnsForActions(options.map((o) => o.action))
+  const basePlayers = mergePlayers(options, roster, match)
+  const { players, columns } = withOpponentEscapeHatch(basePlayers, baseColumns)
 
   if (players.length === 0 || columns.length === 0) {
     return {
@@ -280,8 +326,13 @@ export function getCandidateGrid(
 
   const colIndex = defaultColumnIndex(columns, suggestion.primary)
   let focusPlayerId = suggestion.primary.playerId
-  if (!focusPlayerId || !players.some((p) => p.id === focusPlayerId)) {
-    focusPlayerId = players[0]?.id ?? null
+  if (
+    !focusPlayerId ||
+    isOpponentPlayerId(focusPlayerId) ||
+    !players.some((p) => p.id === focusPlayerId)
+  ) {
+    focusPlayerId =
+      players.find((p) => !isOpponentPlayerId(p.id))?.id ?? players[0]?.id ?? null
   }
 
   return {
@@ -301,29 +352,90 @@ export type FocusCell = {
   columnIndex: number
 }
 
-/** Clamp / resolve focus when the grid rebuilds. */
+/** Clamp / resolve focus when the grid rebuilds; prefer an enabled cell. */
 export function resolveFocus(
   grid: CandidateGrid,
   prev: FocusCell | null,
 ): FocusCell | null {
   if (grid.players.length === 0 || grid.columns.length === 0) return null
+
+  const clamp = (cell: FocusCell): FocusCell => ({
+    rowIndex: Math.min(Math.max(0, cell.rowIndex), grid.players.length - 1),
+    columnIndex: Math.min(Math.max(0, cell.columnIndex), grid.columns.length - 1),
+  })
+
+  const enabledOrNearest = (cell: FocusCell): FocusCell => {
+    const c = clamp(cell)
+    const player = grid.players[c.rowIndex]
+    const column = grid.columns[c.columnIndex]
+    if (player && column && isCellEnabled(player.id, column)) return c
+    // Prefer same row, first enabled column
+    for (let ci = 0; ci < grid.columns.length; ci++) {
+      if (player && isCellEnabled(player.id, grid.columns[ci]!)) {
+        return { rowIndex: c.rowIndex, columnIndex: ci }
+      }
+    }
+    // Any enabled cell
+    for (let ri = 0; ri < grid.players.length; ri++) {
+      for (let ci = 0; ci < grid.columns.length; ci++) {
+        if (isCellEnabled(grid.players[ri]!.id, grid.columns[ci]!)) {
+          return { rowIndex: ri, columnIndex: ci }
+        }
+      }
+    }
+    return c
+  }
+
   if (grid.defaultFocus) {
     const rowIndex = grid.players.findIndex((p) => p.id === grid.defaultFocus!.playerId)
     if (rowIndex >= 0) {
-      return {
+      return enabledOrNearest({
         rowIndex,
-        columnIndex: Math.min(
-          grid.defaultFocus.columnIndex,
-          grid.columns.length - 1,
-        ),
+        columnIndex: grid.defaultFocus.columnIndex,
+      })
+    }
+  }
+  if (prev) return enabledOrNearest(prev)
+  return enabledOrNearest({ rowIndex: 0, columnIndex: 0 })
+}
+
+/**
+ * Move focus by delta, skipping disabled (roster×opponent_error / Opponent×own) cells.
+ */
+export function moveFocusSkippingDisabled(
+  grid: CandidateGrid,
+  from: FocusCell,
+  dRow: number,
+  dCol: number,
+): FocusCell {
+  const rows = grid.players.length
+  const cols = grid.columns.length
+  if (rows === 0 || cols === 0) return from
+
+  let row = from.rowIndex
+  let col = from.columnIndex
+  const maxSteps = rows * cols
+  for (let step = 0; step < maxSteps; step++) {
+    if (dRow !== 0) {
+      row = (row + dRow + rows) % rows
+      // When changing row, land on first enabled column in that row (prefer keep col)
+      if (isCellEnabled(grid.players[row]!.id, grid.columns[col]!)) {
+        return { rowIndex: row, columnIndex: col }
       }
+      for (let offset = 0; offset < cols; offset++) {
+        const ci = (col + offset) % cols
+        if (isCellEnabled(grid.players[row]!.id, grid.columns[ci]!)) {
+          return { rowIndex: row, columnIndex: ci }
+        }
+      }
+    } else if (dCol !== 0) {
+      col = (col + dCol + cols) % cols
+      if (isCellEnabled(grid.players[row]!.id, grid.columns[col]!)) {
+        return { rowIndex: row, columnIndex: col }
+      }
+    } else {
+      break
     }
   }
-  if (prev) {
-    return {
-      rowIndex: Math.min(prev.rowIndex, grid.players.length - 1),
-      columnIndex: Math.min(prev.columnIndex, grid.columns.length - 1),
-    }
-  }
-  return { rowIndex: 0, columnIndex: 0 }
+  return from
 }

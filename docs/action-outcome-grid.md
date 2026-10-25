@@ -1,8 +1,10 @@
-# Action → outcome grid (v2.4)
+# Action → outcome grid (v2.5)
 
 Machine-readable source: [`data/action-outcome-grid.yaml`](../data/action-outcome-grid.yaml). Flow: [`scouting-flow.md`](./scouting-flow.md).
 
-Own side only. **No `perfect`.** Second-touch quality for the setter is derived from prior pass + following attack — not graded in/out on the touch itself. Direct second-touch faults use the two error outcomes below.
+Own side only for our touches. **No `perfect`.** Second-touch quality for the setter is derived from prior pass + following attack — not graded in/out on the touch itself. Direct second-touch faults use the two error outcomes below.
+
+When the **opponent** ends the rally with no useful our touch (e.g. they spike out), log `opponent_error` via a synthetic **Opponent** row in the scout grid (still person × action × outcome).
 
 | Action | Outcomes |
 | --- | --- |
@@ -14,6 +16,7 @@ Own side only. **No `perfect`.** Second-touch quality for the setter is derived 
 | Dump | Point, Defended, Blocked, Error (own), Error (bad set) |
 | Block | Kill block, Recycle, Block error |
 | Freeball (send) | In play, Error |
+| Opponent error | Out, Net, Other |
 
 ## Setter stats (derived)
 

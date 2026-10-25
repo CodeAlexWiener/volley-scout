@@ -1,9 +1,10 @@
-# Action → outcome grid for volley-scout (v2.4)
+# Action → outcome grid for volley-scout (v2.5)
 # Flow-aware own-side scouting. See docs/scouting-flow.md
 # Setter quality is DERIVED from pass (reception/dig) + attack outcomes — not graded on second_touch in/out.
 # Direct second-touch faults: error_own | error_tried_save.
+# Opponent ends rally with no our touch: opponent_error (out | net | other) — synthetic Opponent row in UI.
 
-version: "2.4"
+version: "2.5"
 schema: action_outcome_grid
 
 actions:
@@ -111,3 +112,16 @@ actions:
         label: In play
       - id: error
         label: Error
+
+  - id: opponent_error
+    label: Opponent error
+    note: Opponent ends the rally with no logged our touch (e.g. they hit out). UI uses synthetic Opponent "person"; event has no roster playerId.
+    outcomes:
+      - id: out
+        label: Out
+        note: Ball out / into the outside
+      - id: net
+        label: Net
+      - id: other
+        label: Other
+        note: Other unforced opponent fault (catch, double, referee)

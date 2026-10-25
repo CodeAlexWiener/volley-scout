@@ -31,7 +31,7 @@ No Läufer / generic hitter. Legacy `läufer` / `hitter` / `other` import as `ou
 - After `second_touch`/`set` → attack by front-row slot: **P4 outside**, **P2 opposite (or outside)**, **P3 middle**; setter may dump
 - After `second_touch`/`save` → freeball_send (or attack if still hittable)
 
-## Updated action → outcome grid (v2.4)
+## Updated action → outcome grid (v2.3)
 
 ### serve
 - `ace` → we keep serve → **suggest same player serve again**
@@ -85,6 +85,12 @@ Pairing: our block recycle ↔ their attack defended; kill_block ends point.
 - `in_play` | `error`  
 (Receive freeballs as **dig**, not freeball.)
 
+### opponent_error (synthetic person “Opponent”)
+When they end the rally without a useful our touch — e.g. spike **out** into the outside, into the **net**, or other unforced fault:
+- `out` | `net` | `other`
+- Still logged as person × action × outcome (Opponent row); no roster `playerId`
+- We win the point → we serve next (rotate if we were receiving)
+
 ## Suggestion engine (rules)
 
 | Last event | Suggest next |
@@ -103,6 +109,7 @@ Pairing: our block recycle ↔ their attack defended; kill_block ends point.
 | attack/kill \| dump/point \| block/kill_block | we serve: ensure rotation + serve |
 | attack/defended \| dump/defended | dig/block |
 | attack/blocked \| dump/blocked | cover dig (back) +/or block already logged |
+| opponent_error/out \| net \| other | we score → serve (rotate if side-out) |
 | */error ending point against us | opponent serves → reception |
 
 ## Attribute hand-offs

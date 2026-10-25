@@ -1,11 +1,11 @@
 import type { ActionOutcomeGrid } from '../types'
 
 /**
- * In-app copy of data/action-outcome-grid.yaml (v2.4).
+ * In-app copy of data/action-outcome-grid.yaml (v2.5).
  * Keep in sync when editing the YAML source of truth.
  */
 export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
-  version: '2.4',
+  version: '2.5',
   schema: 'action_outcome_grid',
   actions: [
     {
@@ -106,6 +106,16 @@ export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
       outcomes: [
         { id: 'in_play', label: 'In play' },
         { id: 'error', label: 'Error' },
+      ],
+    },
+    {
+      id: 'opponent_error',
+      label: 'Opponent error',
+      note: 'Opponent ends the rally with no logged our touch (e.g. they hit out). UI uses synthetic Opponent "person"; event has no roster playerId.',
+      outcomes: [
+        { id: 'out', label: 'Out', note: 'Ball out / into the outside' },
+        { id: 'net', label: 'Net' },
+        { id: 'other', label: 'Other', note: 'Other unforced opponent fault (catch, double, referee)' },
       ],
     },
   ],
