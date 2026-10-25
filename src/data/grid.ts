@@ -1,11 +1,11 @@
 import type { ActionOutcomeGrid } from '../types'
 
 /**
- * In-app copy of data/action-outcome-grid.yaml.
+ * In-app copy of data/action-outcome-grid.yaml (v2.1).
  * Keep in sync when editing the YAML source of truth.
  */
 export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
-  version: 1,
+  version: '2.1',
   schema: 'action_outcome_grid',
   actions: [
     {
@@ -13,26 +13,43 @@ export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
       label: 'Serve',
       outcomes: [
         { id: 'ace', label: 'Ace' },
-        { id: 'in_play', label: 'In play', note: 'Rally continues' },
+        {
+          id: 'in_play',
+          label: 'In play',
+          note: 'Rally continues — next own touch is dig/block',
+        },
         { id: 'serve_error', label: 'Serve error' },
       ],
     },
     {
       id: 'reception',
       label: 'Reception',
+      note: 'Only after opponent serve',
       outcomes: [
-        { id: 'perfect', label: 'Perfect' },
-        { id: 'good', label: 'Good' },
-        { id: 'poor', label: 'Poor' },
+        { id: 'in_system', label: 'In system' },
+        { id: 'out_of_system', label: 'Out of system' },
+        { id: 'overpass', label: 'Overpass' },
+        { id: 'error', label: 'Error' },
+      ],
+    },
+    {
+      id: 'dig',
+      label: 'Dig',
+      note: 'Defense after attack/freeball (not serve receive)',
+      outcomes: [
+        { id: 'in_system', label: 'In system' },
+        { id: 'out_of_system', label: 'Out of system' },
+        { id: 'overpass', label: 'Overpass' },
         { id: 'error', label: 'Error' },
       ],
     },
     {
       id: 'set',
       label: 'Set',
+      note: 'Only who set + when. In/out of system comes from prior pass; set quality from following attack.',
       outcomes: [
         { id: 'set', label: 'Set' },
-        { id: 'error', label: 'Error' },
+        { id: 'error', label: 'Error', note: 'Double, catch, net, etc. on the setter' },
       ],
     },
     {
@@ -41,8 +58,21 @@ export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
       outcomes: [
         { id: 'kill', label: 'Kill' },
         { id: 'defended', label: 'Defended' },
-        { id: 'error', label: 'Error' },
         { id: 'blocked', label: 'Blocked' },
+        { id: 'error_own', label: 'Error (own fault)' },
+        { id: 'error_bad_set', label: 'Error (bad set)' },
+      ],
+    },
+    {
+      id: 'dump',
+      label: 'Dump',
+      note: 'Setter tip / dump',
+      outcomes: [
+        { id: 'point', label: 'Point' },
+        { id: 'defended', label: 'Defended' },
+        { id: 'blocked', label: 'Blocked' },
+        { id: 'error_own', label: 'Error (own fault)' },
+        { id: 'error_bad_set', label: 'Error (bad set)' },
       ],
     },
     {
@@ -55,18 +85,11 @@ export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
       ],
     },
     {
-      id: 'dig',
-      label: 'Dig',
+      id: 'freeball_send',
+      label: 'Freeball (send)',
+      note: 'Receiving a freeball = dig',
       outcomes: [
-        { id: 'dig', label: 'Dig' },
-        { id: 'error', label: 'Error' },
-      ],
-    },
-    {
-      id: 'freeball',
-      label: 'Freeball',
-      outcomes: [
-        { id: 'freeball', label: 'Freeball' },
+        { id: 'in_play', label: 'In play' },
         { id: 'error', label: 'Error' },
       ],
     },

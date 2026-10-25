@@ -1,6 +1,6 @@
 # volley-scout
 
-Local-first **manual video scout mask** for volleyball. Load a match video in the browser, bind on-screen players to a roster, and log `player → action → outcome` events at the current timestamp. No AI or computer vision in v1 — every event is human-entered and verified.
+Local-first **manual video scout mask** for volleyball. Load a match video in the browser, bind on-screen players to a roster, and log `player → action → outcome` events at the current timestamp. Own-side only — no opponent stats, no AI/CV.
 
 ## Quick start
 
@@ -9,22 +9,23 @@ npm install
 npm run dev
 ```
 
-Open the URL Vite prints (usually `http://localhost:5173`). Pick a local video file, add roster players, select a current player, choose action + outcome from the grid, and mark the event.
+Open the URL Vite prints (usually `http://localhost:5173`). Pick a local video file, add roster players (role + starting P1–P6), select a current player, choose action + outcome from the grid, and mark the event. After each mark, accept a **Suggested next** chip or override freely.
 
-## What v1 does
+## What it does
 
 - Load a local video (file picker; nothing uploaded to a server)
-- Manage a simple roster (name + optional jersey number)
-- Assign a “current” roster player for the next touch
+- Roster with optional role (setter / Läufer / hitter / other) and starting position P1–P6
+- Court rotation + auto side-out rotate when we earn serve
+- Flow-aware next-action suggestions (player + action; set outcome not graded in/out)
 - Scrub video; mark events at the playhead
 - Verified event log with edit / delete
 - Persist session in `localStorage`; export / import JSON
 
-## Action → outcome grid
+## Action → outcome grid (v2.1)
 
-Machine-readable source of truth: [`data/action-outcome-grid.yaml`](data/action-outcome-grid.yaml). Explainer: [`docs/action-outcome-grid.md`](docs/action-outcome-grid.md).
+Machine-readable source of truth: [`data/action-outcome-grid.yaml`](data/action-outcome-grid.yaml). Explainer: [`docs/action-outcome-grid.md`](docs/action-outcome-grid.md). Flow: [`docs/scouting-flow.md`](docs/scouting-flow.md).
 
-Starter actions: serve, reception, set, attack, block, dig, freeball — each with a fixed set of outcomes.
+Actions: serve, reception, dig, set (`set`|`error` only), attack, dump, block, freeball_send. Pass quality lives on reception/dig; setter analytics are derived later.
 
 ## Event schema (v1)
 
