@@ -181,10 +181,6 @@
   flex: 1 1 8rem;
 }
 
-.roster-form input.num {
-  flex: 0 0 3.5rem;
-  width: 3.5rem;
-}
 
 .panel label {
   display: grid;
@@ -251,13 +247,6 @@
 .player-pick:hover,
 .event-main:hover {
   background: color-mix(in oklab, white 6%, transparent);
-}
-
-.jersey {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  color: var(--sand);
-  min-width: 2.2rem;
 }
 
 .badge {
@@ -601,15 +590,9 @@ button.wide {
   min-width: 0;
 }
 
-.slot-num {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  font-size: 0.85rem;
-  color: var(--ink);
-}
-
 .slot-name {
-  font-size: 0.78rem;
+  font-size: 0.88rem;
+  font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;

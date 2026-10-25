@@ -1,3 +1,4 @@
+import { defaultSession } from './defaultRoster'
 import { emptyMatchState, positionsFromRoster } from './rotation'
 import type {
   CourtPosition,
@@ -32,7 +33,6 @@ function normalizePlayer(raw: Partial<RosterPlayer> & { id: string; name: string
   return {
     id: raw.id,
     name: raw.name,
-    number: raw.number,
     role,
     startingPosition,
   }
@@ -81,17 +81,9 @@ function normalizeSession(parsed: Record<string, unknown>): MatchSession {
   }
 }
 
+/** Fresh session with default six + court positions filled. */
 export function emptySession(): MatchSession {
-  return {
-    version: 2,
-    videoName: null,
-    roster: [],
-    bindings: [],
-    currentPlayerId: null,
-    events: [],
-    match: emptyMatchState(),
-    updatedAt: new Date().toISOString(),
-  }
+  return defaultSession()
 }
 
 export function loadSession(): MatchSession {
@@ -103,7 +95,7 @@ export function loadSession(): MatchSession {
       return emptySession()
     }
     const session = normalizeSession(parsed)
-    // Migrate legacy key forward
+    // Migrate legacy key forward (also strips jersey numbers on save)
     if (!localStorage.getItem(STORAGE_KEY)) {
       saveSession(session)
     }
@@ -119,7 +111,18 @@ export function saveSession(session: MatchSession): void {
 }
 
 export function exportSessionJson(session: MatchSession): string {
-  return JSON.stringify({ ...session, version: 2, updatedAt: new Date().toISOString() }, null, 2)
+  const cleaned: MatchSession = {
+    ...session,
+    version: 2,
+    roster: session.roster.map(({ id, name, role, startingPosition }) => ({
+      id,
+      name,
+      role,
+      startingPosition,
+    })),
+    updatedAt: new Date().toISOString(),
+  }
+  return JSON.stringify(cleaned, null, 2)
 }
 
 export function parseImportedSession(text: string): MatchSession {

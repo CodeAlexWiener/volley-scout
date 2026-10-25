@@ -14,8 +14,8 @@ Open the URL Vite prints (usually `http://localhost:5173`). Pick a local video f
 ## What it does
 
 - Load a local video (file picker; nothing uploaded to a server)
-- Roster with optional role (setter / outside / opposite / middle) and starting position P1–P6
-- Live court diagram of our side (P1–P6, front vs back, server highlight)
+- Default six-player roster on first load (editable); roles setter / outside / opposite / middle + P1–P6
+- Live court diagram of our side (P1–P6, front vs back, server highlight); no jersey numbers
 - Court rotation + auto side-out rotate when we earn serve
 - Flow-aware next-action suggestions (player + action; set outcome not graded in/out)
 - Scrub video; mark events at the playhead

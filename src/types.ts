@@ -13,7 +13,6 @@ export type ServingTeam = 'us' | 'them'
 export type RosterPlayer = {
   id: string
   name: string
-  number?: string
   role?: PlayerRole
   /** Starting lineup slot (1–6). */
   startingPosition?: CourtPosition

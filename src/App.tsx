@@ -32,14 +32,12 @@ import './App.css'
 
 type RosterDraft = {
   name: string
-  number: string
   role: '' | PlayerRole
   startingPosition: '' | CourtPosition
 }
 
 const emptyDraft = (): RosterDraft => ({
   name: '',
-  number: '',
   role: '',
   startingPosition: '',
 })
@@ -131,13 +129,12 @@ export default function App() {
   function addOrUpdatePlayer() {
     const name = rosterDraft.name.trim()
     if (!name) return
-    const number = rosterDraft.number.trim() || undefined
     const role = rosterDraft.role || undefined
     const startingPosition = rosterDraft.startingPosition || undefined
     if (editPlayerId) {
       updateSession((s) => {
         const roster = s.roster.map((p) =>
-          p.id === editPlayerId ? { ...p, name, number, role, startingPosition } : p,
+          p.id === editPlayerId ? { ...p, name, role, startingPosition } : p,
         )
         return {
           ...s,
@@ -153,7 +150,6 @@ export default function App() {
       const player: RosterPlayer = {
         id: newId('pl'),
         name,
-        number,
         role,
         startingPosition,
       }
@@ -176,7 +172,6 @@ export default function App() {
     setEditPlayerId(player.id)
     setRosterDraft({
       name: player.name,
-      number: player.number ?? '',
       role: player.role ?? '',
       startingPosition: player.startingPosition ?? '',
     })
@@ -525,13 +520,6 @@ export default function App() {
                 onChange={(e) => setRosterDraft((d) => ({ ...d, name: e.target.value }))}
                 onKeyDown={(e) => e.key === 'Enter' && addOrUpdatePlayer()}
               />
-              <input
-                className="num"
-                placeholder="#"
-                value={rosterDraft.number}
-                onChange={(e) => setRosterDraft((d) => ({ ...d, number: e.target.value }))}
-                onKeyDown={(e) => e.key === 'Enter' && addOrUpdatePlayer()}
-              />
               <select
                 value={rosterDraft.role}
                 onChange={(e) =>
@@ -602,7 +590,6 @@ export default function App() {
                         updateSession((s) => ({ ...s, currentPlayerId: player.id }))
                       }
                     >
-                      <span className="jersey">{player.number ? `#${player.number}` : '—'}</span>
                       <span>{player.name}</span>
                       {player.role && (
                         <span className="meta-chip">{roleLabel(player.role)}</span>
@@ -851,7 +838,6 @@ function CourtSlot({
   const playerId = playerAt(session.match.positions, pos)
   const player = session.roster.find((p) => p.id === playerId)
   const isServer = session.match.servingTeam === 'us' && pos === 1
-  const jersey = player?.number ? `#${player.number}` : null
   return (
     <button
       type="button"
@@ -874,7 +860,6 @@ function CourtSlot({
         {player?.role && <span className="slot-role">{roleShort(player.role)}</span>}
       </span>
       <span className="slot-body">
-        {jersey && <span className="slot-num">{jersey}</span>}
         <span className="slot-name">{player ? player.name : '—'}</span>
       </span>
     </button>

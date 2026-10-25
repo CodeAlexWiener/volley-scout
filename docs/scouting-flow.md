@@ -20,7 +20,8 @@ No Läufer / generic hitter. Legacy `läufer` / `hitter` / `other` import as `ou
 - Court slots **P1–P6** (standard): P1 back-right (server when we serve), P2 front-right, P3 front-middle, P4 front-left, P5 back-left, P6 back-middle.
 - Assign each player a **role** and **starting position** P1–P6.
 - Track P1–P6 + rotate clockwise when we gain the right to serve.
-- **UI court diagram** (our half): live name/number in each slot; front row (P2–P4) vs back row (P5–P6–P1) visually distinct; server (P1) highlighted when we serve; updates on rotate / Apply starting.
+- **UI court diagram** (our half): live player name in each slot; front row (P2–P4) vs back row (P5–P6–P1) visually distinct; server (P1) highlighted when we serve; updates on rotate / Apply starting.
+- Fresh sessions start with a default six (Peter/Julia/Manu/Alex/Lucas/Kathi) already placed on P1–P6.
 - **Rotate** on side-out when we earn serve. Manual Rotate still available.
 
 ## Attack / set suggestion heuristics
