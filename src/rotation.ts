@@ -178,8 +178,11 @@ export function possessionAfterEvent(
     return { kind: 'rally_continues' }
   }
 
-  // second_touch: set | save — both keep rally alive (no error outcome in v2.3)
+  // second_touch: set | save keep rally alive; error_own | error_tried_save end the point
   if (action === 'second_touch' || action === 'set') {
+    if (outcome === 'error_own' || outcome === 'error_tried_save') {
+      return servingTeam === 'us' ? { kind: 'they_gain_serve' } : { kind: 'they_keep_serve' }
+    }
     return { kind: 'rally_continues' }
   }
 

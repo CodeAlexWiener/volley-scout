@@ -56,6 +56,7 @@ function shortOutcomeLabel(actionId: string, outcomeId: string): string {
     defended: 'Def',
     blocked: 'Blk',
     error_own: 'OwnErr',
+    error_tried_save: 'TriedSave',
     error_bad_set: 'BadSet',
     point: 'Pt',
     kill_block: 'Kill',
