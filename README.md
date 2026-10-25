@@ -22,11 +22,11 @@ Open the URL Vite prints (usually `http://localhost:5173`). Pick a local video f
 - Verified event log with edit / delete
 - Persist session in `localStorage`; export / import JSON
 
-## Action → outcome grid (v2.3)
+## Action → outcome grid (v2.4)
 
 Machine-readable source of truth: [`data/action-outcome-grid.yaml`](data/action-outcome-grid.yaml). Explainer: [`docs/action-outcome-grid.md`](docs/action-outcome-grid.md). Flow: [`docs/scouting-flow.md`](docs/scouting-flow.md).
 
-Actions: serve, reception, dig, second_touch (`set`|`save`), attack, dump, block, freeball_send. Pass quality lives on reception/dig; setter analytics are derived later.
+Actions: serve, reception, dig, second_touch (`set`|`save`|`error_own`|`error_tried_save`), attack, dump, block, freeball_send. Pass quality lives on reception/dig; setter analytics are derived later.
 
 ## Event schema (v1)
 

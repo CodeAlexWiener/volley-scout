@@ -1,21 +1,19 @@
-# Action → outcome grid (v2.3)
+# Action → outcome grid (v2.4)
 
 Machine-readable source: [`data/action-outcome-grid.yaml`](../data/action-outcome-grid.yaml). Flow: [`scouting-flow.md`](./scouting-flow.md).
 
-Own side only. **No `perfect`.** Second-touch quality for the setter is derived from prior pass + following attack — not graded in/out on the touch itself.
+Own side only. **No `perfect`.** Second-touch quality for the setter is derived from prior pass + following attack — not graded in/out on the touch itself. Direct second-touch faults use the two error outcomes below.
 
 | Action | Outcomes |
 | --- | --- |
 | Serve | Ace, In play — in system, In play — out of system, Serve error |
 | Reception | In system, Out of system, Overpass, Error |
 | Dig | In system, Out of system, Overpass, Error |
-| Second touch | Set, Save |
+| Second touch | Set, Save, Error (own fault), Error (tried save) |
 | Attack | Kill, Defended, Blocked, Error (own), Error (bad set) |
 | Dump | Point, Defended, Blocked, Error (own), Error (bad set) |
 | Block | Kill block, Recycle, Block error |
 | Freeball (send) | In play, Error |
-
-Breaking from v2.2: action `set` → `second_touch` with outcomes `set` | `save` (old set `error` removed).
 
 ## Setter stats (derived)
 
@@ -28,3 +26,6 @@ Link rally chain: `reception|dig` → `second_touch` → `attack|dump`.
 | Bad set | Following attack/dump `error_bad_set` |
 | Dump performance | Dump events on setter |
 | Save rate | `second_touch` / `save` |
+| Second-touch errors | `error_own` (own fault) vs `error_tried_save` (failed emergency save) |
+
+**Still useful later (optional, not required to scout):** `priorEventId` on each event so chains are explicit; without it, use time order within a point.

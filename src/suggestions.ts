@@ -132,6 +132,14 @@ export function suggestNext(
   }
 
   if (action === 'second_touch' || action === 'set') {
+    if (outcome === 'error_own' || outcome === 'error_tried_save') {
+      const label =
+        outcome === 'error_own' ? 'Second-touch error (own)' : 'Second-touch error (tried save)'
+      if (match.servingTeam === 'us') {
+        return suggestServe(roster, match, `${label} but we serve`)
+      }
+      return suggestReception(roster, match, `${label} → opponent serves, reception`)
+    }
     if (outcome === 'save') {
       return {
         primary: opt(playerId, 'freeball_send', null, 'Save — often freeball send'),

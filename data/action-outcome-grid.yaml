@@ -1,8 +1,9 @@
-# Action → outcome grid for volley-scout (v2.3)
+# Action → outcome grid for volley-scout (v2.4)
 # Flow-aware own-side scouting. See docs/scouting-flow.md
 # Setter quality is DERIVED from pass (reception/dig) + attack outcomes — not graded on second_touch in/out.
+# Direct second-touch faults: error_own | error_tried_save.
 
-version: "2.3"
+version: "2.4"
 schema: action_outcome_grid
 
 actions:
@@ -48,7 +49,7 @@ actions:
 
   - id: second_touch
     label: Second touch
-    note: Second team contact after reception/dig. In/out of system comes from prior pass; quality from following attack.
+    note: Second team contact after reception/dig. In/out of system comes from prior pass; quality from following attack. Direct faults use error_own / error_tried_save.
     outcomes:
       - id: set
         label: Set
@@ -56,6 +57,12 @@ actions:
       - id: save
         label: Save
         note: Emergency second touch to keep the ball playable
+      - id: error_own
+        label: Error (own fault)
+        note: Second-touch fault ending the point (net, lift, out, etc.) — not a failed save attempt
+      - id: error_tried_save
+        label: Error (tried save)
+        note: Tried an emergency save and the ball died / point ended
 
   - id: attack
     label: Attack

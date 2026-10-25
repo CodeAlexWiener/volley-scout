@@ -1,11 +1,11 @@
 import type { ActionOutcomeGrid } from '../types'
 
 /**
- * In-app copy of data/action-outcome-grid.yaml (v2.3).
+ * In-app copy of data/action-outcome-grid.yaml (v2.4).
  * Keep in sync when editing the YAML source of truth.
  */
 export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
-  version: '2.3',
+  version: '2.4',
   schema: 'action_outcome_grid',
   actions: [
     {
@@ -51,10 +51,20 @@ export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
     {
       id: 'second_touch',
       label: 'Second touch',
-      note: 'Second team contact after reception/dig. In/out of system comes from prior pass; quality from following attack.',
+      note: 'Second team contact after reception/dig. In/out of system comes from prior pass; quality from following attack. Direct faults use error_own / error_tried_save.',
       outcomes: [
         { id: 'set', label: 'Set', note: 'Intentional set to a hitter' },
         { id: 'save', label: 'Save', note: 'Emergency second touch to keep the ball playable' },
+        {
+          id: 'error_own',
+          label: 'Error (own fault)',
+          note: 'Second-touch fault ending the point (net, lift, out, etc.) — not a failed save attempt',
+        },
+        {
+          id: 'error_tried_save',
+          label: 'Error (tried save)',
+          note: 'Tried an emergency save and the ball died / point ended',
+        },
       ],
     },
     {
