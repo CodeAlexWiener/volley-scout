@@ -1,0 +1,77 @@
+# Action → outcome grid for volley-scout (v1)
+# Source of truth for allowed outcomes per action.
+# Stable snake_case ids; labels are for UI display.
+# Alex may edit freely — keep ids stable once events exist.
+
+version: 1
+schema: action_outcome_grid
+
+actions:
+  - id: serve
+    label: Serve
+    outcomes:
+      - id: ace
+        label: Ace
+      - id: in_play
+        label: In play
+        note: Rally continues
+      - id: serve_error
+        label: Serve error
+
+  - id: reception
+    label: Reception
+    outcomes:
+      - id: perfect
+        label: Perfect
+      - id: good
+        label: Good
+      - id: poor
+        label: Poor
+      - id: error
+        label: Error
+
+  - id: set
+    label: Set
+    outcomes:
+      - id: set
+        label: Set
+      - id: error
+        label: Error
+
+  - id: attack
+    label: Attack
+    outcomes:
+      - id: kill
+        label: Kill
+      - id: defended
+        label: Defended
+      - id: error
+        label: Error
+      - id: blocked
+        label: Blocked
+
+  - id: block
+    label: Block
+    outcomes:
+      - id: kill_block
+        label: Kill block
+      - id: recycle
+        label: Recycle
+      - id: block_error
+        label: Block error
+
+  - id: dig
+    label: Dig
+    outcomes:
+      - id: dig
+        label: Dig
+      - id: error
+        label: Error
+
+  - id: freeball
+    label: Freeball
+    outcomes:
+      - id: freeball
+        label: Freeball
+      - id: error
+        label: Error

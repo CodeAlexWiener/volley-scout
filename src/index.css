@@ -1,0 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Grotesk:wght@500;700&display=swap');
+
+:root {
+  --court: #0f1f17;
+  --panel: #14261d;
+  --navy: #16324f;
+  --sand: #e2c48a;
+  --accent: #3ecf8e;
+  --ink: #eef3ee;
+  --muted: #9bb0a4;
+  --line: color-mix(in oklab, white 14%, transparent);
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  font-family: var(--font-body);
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse at 10% -10%, color-mix(in oklab, var(--navy) 55%, transparent), transparent 45%),
+    radial-gradient(ellipse at 90% 0%, color-mix(in oklab, var(--accent) 12%, transparent), transparent 40%),
+    linear-gradient(160deg, #0a1510 0%, var(--court) 45%, #0c1812 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+}
+
+a {
+  color: var(--sand);
+}
