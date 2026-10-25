@@ -1,12 +1,33 @@
 # Flow-aware scouting (own side only)
 
-We never log opponent touches. After each event, the UI suggests the **next likely own-side action + player** from volleyball rules + rotation (Läufer).
+We never log opponent touches. After each event, the UI suggests the **next likely own-side action + player** from volleyball rules + rotation.
 
-## Rotation / Läufer
+## Roles
+
+Only these roster roles:
+
+| Id | Label |
+| --- | --- |
+| `setter` | Setter |
+| `outside` | Outside Hitter |
+| `opposite` | Opposite |
+| `middle` | Middle Blocker |
+
+No Läufer / generic hitter. Legacy `läufer` / `hitter` / `other` import as `outside`.
+
+## Rotation + court diagram
 
 - Court slots **P1–P6** (standard): P1 back-right (server when we serve), P2 front-right, P3 front-middle, P4 front-left, P5 back-left, P6 back-middle.
-- On roster setup: assign each player a **starting position** and optionally mark **one Läufer** (defensive specialist). **v1**: track P1–P6 + rotate clockwise on side-out *when we gain the right to serve*; Läufer flag prefers Läufer for dig/reception suggestions in back row.
-- **Rotate** when serve possession changes to us (side-out): we scored while receiving → rotate before we serve. We erred on serve / lost while serving → they serve: no our rotate until we side-out again.
+- Assign each player a **role** and **starting position** P1–P6.
+- Track P1–P6 + rotate clockwise when we gain the right to serve.
+- **UI court diagram** (our half): live name/number in each slot; front row (P2–P4) vs back row (P5–P6–P1) visually distinct; server (P1) highlighted when we serve; updates on rotate / Apply starting.
+- **Rotate** on side-out when we earn serve. Manual Rotate still available.
+
+## Attack / set suggestion heuristics
+
+- **in_system** pass → prefer `setter` for set
+- **out_of_system** → set without forcing setter
+- After set → attack by front-row slot: **P4 outside**, **P2 opposite (or outside)**, **P3 middle**; setter may dump
 
 ## Updated action → outcome grid (v2.1)
 
@@ -39,24 +60,14 @@ Same as reception: `in_system` | `out_of_system` | `overpass` | `error` (no perf
 - `error_own` — attacker fault (out, net, lift)
 - `error_bad_set` — unhittable set, attack attempt fails because of set
 
-Flow: kill → we serve next (rotate if we were receiving). defended → suggest dig/block. blocked → suggest cover dig / block recycle on our blocker. errors → point over → reception or serve.
-
 ### dump (separate action — setter tip/dump)
-- `point` (kill dump)
-- `defended`
-- `blocked`
-- `error_own`
-- `error_bad_set` (rare)
+- `point` | `defended` | `blocked` | `error_own` | `error_bad_set`
 
 ### block
-- `kill_block`
-- `recycle` (soft / playable)
-- `block_error`
-
-Pairing: our block recycle ↔ their attack defended; kill_block ends point.
+- `kill_block` | `recycle` | `block_error`
 
 ### freeball_send
-- `in_play` | `error`
+- `in_play` | `error`  
 (Receive freeballs as **dig**, not freeball.)
 
 ## Suggestion engine (rules)
@@ -65,13 +76,13 @@ Pairing: our block recycle ↔ their attack defended; kill_block ends point.
 | --- | --- |
 | serve/ace | same player + serve |
 | serve/in_play | front-row → block; back-row → dig |
-| serve/serve_error | reception (back-row / Läufer preferred) |
+| serve/serve_error | reception (back-row / outside preferred) |
 | reception/in_system | setter + set (do not prefill in/out on set) |
 | reception/out_of_system | set, player unconstrained |
 | reception/overpass | dig/block |
 | reception/error | if we now serve: rotate + serve P1; else reception |
 | dig/* | same pattern as reception → set |
-| set/* | hitter suggestion by position (P4/P2/P3) + attack; setter may dump |
+| set/* | attack by P4/P2/P3 role heuristics; setter may dump |
 | attack/kill \| dump/point \| block/kill_block | we serve: ensure rotation + serve |
 | attack/defended \| dump/defended | dig/block |
 | attack/blocked \| dump/blocked | cover dig (back) |
@@ -83,13 +94,3 @@ Pairing: our block recycle ↔ their attack defended; kill_block ends point.
 - Attack `error_bad_set` vs `error_own` → setter vs hitter blame
 - Attack blocked ↔ block recycle/kill
 - Never log opponent actions; infer only our next touch
-
-## Setter analytics (computed, not scouted as set grade)
-
-Need a rally chain (time-ordered events in a point, ideally `priorEventId` later):
-
-1. **% in-system sets** — sets whose preceding reception/dig was `in_system`
-2. **Assists** — set followed by attack `kill` or dump `point`
-3. **Bad sets** — following attack/dump `error_bad_set`
-4. **Setter errors** — set outcome `error`
-5. **Dump rates** — dump action by setter

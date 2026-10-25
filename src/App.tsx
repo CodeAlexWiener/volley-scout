@@ -57,9 +57,18 @@ export default function App() {
   const [rosterDraft, setRosterDraft] = useState<RosterDraft>(emptyDraft)
   const [editPlayerId, setEditPlayerId] = useState<string | null>(null)
   const [suggestion, setSuggestion] = useState<FlowSuggestion | null>(null)
+  /** Bumps on rotate so court slots re-animate. */
+  const [courtPulse, setCourtPulse] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const positionsSig = useMemo(
+    () => COURT_POSITIONS.map((p) => session.match.positions[p] ?? '').join('|'),
+    [session.match.positions],
+  )
+  useEffect(() => {
+    setCourtPulse((n) => n + 1)
+  }, [positionsSig])
 
   const outcomes = useMemo(() => {
     return ACTION_OUTCOME_GRID.actions.find((a) => a.id === actionId)?.outcomes ?? []
@@ -492,35 +501,16 @@ export default function App() {
                 Apply starting P1–P6
               </button>
             </div>
-            <div className="court" aria-label="Court positions P1–P6">
-              <div className="court-net">Net</div>
-              <div className="court-row front">
-                {[4, 3, 2].map((pos) => (
-                  <CourtSlot
-                    key={pos}
-                    pos={pos as CourtPosition}
-                    session={session}
-                    onPick={(playerId) =>
-                      updateSession((s) => ({ ...s, currentPlayerId: playerId }))
-                    }
-                  />
-                ))}
-              </div>
-              <div className="court-row back">
-                {[5, 6, 1].map((pos) => (
-                  <CourtSlot
-                    key={pos}
-                    pos={pos as CourtPosition}
-                    session={session}
-                    onPick={(playerId) =>
-                      updateSession((s) => ({ ...s, currentPlayerId: playerId }))
-                    }
-                  />
-                ))}
-              </div>
-            </div>
+            <CourtDiagram
+              session={session}
+              pulseKey={courtPulse}
+              onPick={(playerId) =>
+                updateSession((s) => ({ ...s, currentPlayerId: playerId }))
+              }
+            />
             <p className="hint">
-              Auto-rotates on side-out when we earn serve. Läufer preferred for reception/dig.
+              Our half · front P2–P4 / back P5–P6–P1 · P1 serves when we have serve. Attack
+              suggest: P4 outside, P2 opposite/outside, P3 middle. Auto-rotates on side-out.
             </p>
           </section>
         </section>
@@ -596,7 +586,9 @@ export default function App() {
             </div>
             <ul className="roster-list">
               {session.roster.length === 0 && (
-                <li className="muted">Add players with role + starting P1–P6.</li>
+                <li className="muted">
+                  Add players (Setter / Outside / Opposite / Middle) + starting P1–P6.
+                </li>
               )}
               {session.roster.map((player) => {
                 const active = player.id === session.currentPlayerId
@@ -760,27 +752,131 @@ function roleLabel(role: PlayerRole): string {
   return PLAYER_ROLES.find((r) => r.id === role)?.label ?? role
 }
 
+function roleShort(role: PlayerRole | undefined): string {
+  if (!role) return ''
+  if (role === 'setter') return 'S'
+  if (role === 'outside') return 'OH'
+  if (role === 'opposite') return 'OPP'
+  return 'MB'
+}
+
+function CourtDiagram({
+  session,
+  pulseKey,
+  onPick,
+}: {
+  session: MatchSession
+  pulseKey: number
+  onPick: (playerId: string) => void
+}) {
+  const weServe = session.match.servingTeam === 'us'
+  return (
+    <div className="court-wrap" aria-label="Our side court positions P1–P6">
+      <div className="court-banner">
+        <span>Our side</span>
+        <span className={weServe ? 'serve-pill on' : 'serve-pill'}>
+          {weServe ? 'We serve · P1' : 'They serve'}
+        </span>
+      </div>
+      <div className="court" data-pulse={pulseKey}>
+        <svg className="court-lines" viewBox="0 0 300 220" aria-hidden>
+          <rect x="8" y="8" width="284" height="204" rx="4" className="court-outline" />
+          <line x1="8" y1="18" x2="292" y2="18" className="court-net-line" />
+          <text x="150" y="14" textAnchor="middle" className="court-svg-label">
+            Net
+          </text>
+          {/* Attack line between front and back */}
+          <line x1="8" y1="112" x2="292" y2="112" className="court-attack-line" />
+          <text x="16" y="106" className="court-svg-label muted-svg">
+            Attack line
+          </text>
+          <text x="16" y="40" className="court-svg-label muted-svg">
+            Front
+          </text>
+          <text x="16" y="200" className="court-svg-label muted-svg">
+            Back
+          </text>
+        </svg>
+        <div className="court-slots">
+          <div className="court-row front" aria-label="Front row P4 P3 P2">
+            {([4, 3, 2] as CourtPosition[]).map((pos) => (
+              <CourtSlot
+                key={`${pos}-${pulseKey}`}
+                pos={pos}
+                row="front"
+                session={session}
+                onPick={onPick}
+              />
+            ))}
+          </div>
+          <div className="court-row back" aria-label="Back row P5 P6 P1">
+            {([5, 6, 1] as CourtPosition[]).map((pos) => (
+              <CourtSlot
+                key={`${pos}-${pulseKey}`}
+                pos={pos}
+                row="back"
+                session={session}
+                onPick={onPick}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="court-legend">
+        <span>
+          <i className="leg front" /> Front P2–P4
+        </span>
+        <span>
+          <i className="leg back" /> Back P5–P6–P1
+        </span>
+        <span>
+          <i className="leg server" /> Server
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function CourtSlot({
   pos,
+  row,
   session,
   onPick,
 }: {
   pos: CourtPosition
+  row: 'front' | 'back'
   session: MatchSession
   onPick: (playerId: string) => void
 }) {
   const playerId = playerAt(session.match.positions, pos)
   const player = session.roster.find((p) => p.id === playerId)
   const isServer = session.match.servingTeam === 'us' && pos === 1
+  const jersey = player?.number ? `#${player.number}` : null
   return (
     <button
       type="button"
-      className={`court-slot${isServer ? ' server' : ''}${playerId === session.currentPlayerId ? ' active' : ''}`}
+      className={[
+        'court-slot',
+        row,
+        isServer ? 'server' : '',
+        playerId === session.currentPlayerId ? 'active' : '',
+        playerId ? '' : 'empty',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       onClick={() => playerId && onPick(playerId)}
       disabled={!playerId}
+      title={player ? `${playerLabel(player)}${player.role ? ` · ${roleLabel(player.role)}` : ''}` : `P${pos} empty`}
     >
-      <span className="slot-pos">P{pos}</span>
-      <span className="slot-name">{player ? playerLabel(player) : '—'}</span>
+      <span className="slot-top">
+        <span className="slot-pos">P{pos}</span>
+        {isServer && <span className="server-tag">Serve</span>}
+        {player?.role && <span className="slot-role">{roleShort(player.role)}</span>}
+      </span>
+      <span className="slot-body">
+        {jersey && <span className="slot-num">{jersey}</span>}
+        <span className="slot-name">{player ? player.name : '—'}</span>
+      </span>
     </button>
   )
 }

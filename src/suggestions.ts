@@ -136,10 +136,11 @@ export function suggestNext(
       }
       return suggestReception(roster, match, 'Set error → reception')
     }
+    // P4 outside → P2 opposite/outside → P3 middle (see ATTACK_SLOT_ROLES)
     const hitter = preferFrontRowHitter(roster, match.positions)
     const setter = findSetterId(roster) ?? playerId
     return {
-      primary: opt(hitter, 'attack', null, 'Set → front-row attack'),
+      primary: opt(hitter, 'attack', null, 'Set → front-row attack (P4/P2/P3)'),
       alternates: [opt(setter, 'dump', null, 'Setter may dump')],
     }
   }

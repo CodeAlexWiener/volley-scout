@@ -2,6 +2,7 @@ import { BACK_ROW, FRONT_ROW } from './types'
 import type {
   CourtPosition,
   MatchState,
+  PlayerRole,
   RosterPlayer,
   ServingTeam,
 } from './types'
@@ -14,6 +15,16 @@ const ROTATE_FROM: Record<CourtPosition, CourtPosition> = {
   4: 5,
   5: 6,
   6: 1,
+}
+
+/**
+ * Preferred hitter role for each front-row attack slot.
+ * P4 = outside, P2 = opposite (outside ok), P3 = middle.
+ */
+export const ATTACK_SLOT_ROLES: Record<2 | 3 | 4, PlayerRole[]> = {
+  4: ['outside'],
+  2: ['opposite', 'outside'],
+  3: ['middle'],
 }
 
 export function emptyMatchState(): MatchState {
@@ -79,46 +90,63 @@ export function findSetterId(roster: RosterPlayer[]): string | null {
   return roster.find((p) => p.role === 'setter')?.id ?? null
 }
 
-export function findLauferId(roster: RosterPlayer[]): string | null {
-  return roster.find((p) => p.role === 'läufer')?.id ?? null
+function findByRoles(roster: RosterPlayer[], roles: PlayerRole[]): string | null {
+  for (const role of roles) {
+    const hit = roster.find((p) => p.role === role)
+    if (hit) return hit.id
+  }
+  return null
 }
 
 /**
- * Prefer Läufer if they are (or would be) back-row; else first back-row player;
- * else any roster player.
+ * Prefer back-row outside (common primary passer), else any back-row player.
  */
 export function preferBackRowReceiver(
   roster: RosterPlayer[],
   positions: Partial<Record<CourtPosition, string>>,
 ): string | null {
   const back = playersInRow(positions, 'back')
-  const laufer = findLauferId(roster)
-  if (laufer && (back.includes(laufer) || back.length === 0)) return laufer
+  const byId = new Map(roster.map((p) => [p.id, p]))
+  const outsideBack = back.find((id) => byId.get(id)?.role === 'outside')
+  if (outsideBack) return outsideBack
   if (back[0]) return back[0]
-  return roster[0]?.id ?? null
+  return findByRoles(roster, ['outside']) ?? roster[0]?.id ?? null
 }
 
+/** Prefer middle blocker in front row, else any front-row player. */
 export function preferFrontRowBlocker(
   roster: RosterPlayer[],
   positions: Partial<Record<CourtPosition, string>>,
 ): string | null {
   const front = playersInRow(positions, 'front')
+  const byId = new Map(roster.map((p) => [p.id, p]))
+  const middle = front.find((id) => byId.get(id)?.role === 'middle')
+  if (middle) return middle
   if (front[0]) return front[0]
-  const hitter = roster.find((p) => p.role === 'hitter')
-  return hitter?.id ?? roster[0]?.id ?? null
+  return findByRoles(roster, ['middle', 'outside', 'opposite']) ?? roster[0]?.id ?? null
 }
 
-/** Prefer outside (P4), then opposite (P2), then middle (P3). */
+/**
+ * Prefer front-row hitters by slot: P4 outside → P2 opposite/outside → P3 middle.
+ * Occupant of the slot wins (skip setter if another front hitter exists); else role fallback.
+ */
 export function preferFrontRowHitter(
   roster: RosterPlayer[],
   positions: Partial<Record<CourtPosition, string>>,
 ): string | null {
-  for (const pos of [4, 2, 3] as CourtPosition[]) {
+  const byId = new Map(roster.map((p) => [p.id, p]))
+  for (const pos of [4, 2, 3] as const) {
+    const id = positions[pos]
+    if (!id) continue
+    if (byId.get(id)?.role !== 'setter') return id
+  }
+  for (const pos of [4, 2, 3] as const) {
     const id = positions[pos]
     if (id) return id
   }
-  const hitter = roster.find((p) => p.role === 'hitter')
-  return hitter?.id ?? roster[0]?.id ?? null
+  return (
+    findByRoles(roster, ['outside', 'opposite', 'middle']) ?? roster[0]?.id ?? null
+  )
 }
 
 export type ServePossessionChange =
@@ -169,9 +197,7 @@ export function possessionAfterEvent(
       outcome === 'error_bad_set' ||
       outcome === 'blocked'
     ) {
-      // blocked ends our attack attempt; treat as point against when stuff,
-      // but "blocked" in grid can also mean channelled — spec: suggest cover dig,
-      // so rally continues for blocked. Only errors end the point.
+      // blocked → cover dig (rally continues). Only errors end the point.
       if (outcome === 'blocked') return { kind: 'rally_continues' }
       return servingTeam === 'us' ? { kind: 'they_gain_serve' } : { kind: 'they_keep_serve' }
     }

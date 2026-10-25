@@ -1,5 +1,8 @@
-/** Optional role for suggestion heuristics. */
-export type PlayerRole = 'setter' | 'läufer' | 'hitter' | 'other'
+/**
+ * Roster roles (no Läufer / generic hitter).
+ * Attack heuristics by front-row slot: P4 outside, P2 opposite (or outside), P3 middle.
+ */
+export type PlayerRole = 'setter' | 'outside' | 'opposite' | 'middle'
 
 /** Standard court slots P1–P6. */
 export type CourtPosition = 1 | 2 | 3 | 4 | 5 | 6
@@ -100,10 +103,21 @@ export type FlowSuggestion = {
 
 export const PLAYER_ROLES: { id: PlayerRole; label: string }[] = [
   { id: 'setter', label: 'Setter' },
-  { id: 'läufer', label: 'Läufer' },
-  { id: 'hitter', label: 'Hitter' },
-  { id: 'other', label: 'Other' },
+  { id: 'outside', label: 'Outside Hitter' },
+  { id: 'opposite', label: 'Opposite' },
+  { id: 'middle', label: 'Middle Blocker' },
 ]
+
+/** Legacy role ids → current (import / localStorage migration). */
+export const LEGACY_ROLE_MAP: Record<string, PlayerRole> = {
+  läufer: 'outside',
+  hitter: 'outside',
+  other: 'outside',
+  setter: 'setter',
+  outside: 'outside',
+  opposite: 'opposite',
+  middle: 'middle',
+}
 
 export const COURT_POSITIONS: CourtPosition[] = [1, 2, 3, 4, 5, 6]
 export const FRONT_ROW: CourtPosition[] = [2, 3, 4]

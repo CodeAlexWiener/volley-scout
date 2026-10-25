@@ -7,18 +7,25 @@ import type {
   RosterPlayer,
   ScoutEvent,
 } from './types'
+import { LEGACY_ROLE_MAP } from './types'
 
 const STORAGE_KEY = 'volley-scout:session:v2'
 const LEGACY_STORAGE_KEY = 'volley-scout:session:v1'
 
-const ROLES = new Set<PlayerRole>(['setter', 'läufer', 'hitter', 'other'])
+const ROLES = new Set<PlayerRole>(['setter', 'outside', 'opposite', 'middle'])
 
 function isCourtPosition(n: unknown): n is CourtPosition {
   return n === 1 || n === 2 || n === 3 || n === 4 || n === 5 || n === 6
 }
 
+function normalizeRole(raw: unknown): PlayerRole | undefined {
+  if (typeof raw !== 'string') return undefined
+  const mapped = LEGACY_ROLE_MAP[raw] ?? (ROLES.has(raw as PlayerRole) ? (raw as PlayerRole) : undefined)
+  return mapped && ROLES.has(mapped) ? mapped : undefined
+}
+
 function normalizePlayer(raw: Partial<RosterPlayer> & { id: string; name: string }): RosterPlayer {
-  const role = raw.role && ROLES.has(raw.role) ? raw.role : undefined
+  const role = normalizeRole(raw.role)
   const startingPosition = isCourtPosition(raw.startingPosition)
     ? raw.startingPosition
     : undefined
