@@ -22,7 +22,7 @@ Open the URL Vite prints (usually `http://localhost:5173`). Pick a local video f
 - Verified event log with edit / delete
 - Persist session in `localStorage`; export / import JSON
 
-## Action → outcome grid (v2.1)
+## Action → outcome grid (v2.2)
 
 Machine-readable source of truth: [`data/action-outcome-grid.yaml`](data/action-outcome-grid.yaml). Explainer: [`docs/action-outcome-grid.md`](docs/action-outcome-grid.md). Flow: [`docs/scouting-flow.md`](docs/scouting-flow.md).
 

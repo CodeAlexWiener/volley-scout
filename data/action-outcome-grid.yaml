@@ -1,8 +1,8 @@
-# Action → outcome grid for volley-scout (v2.1)
+# Action → outcome grid for volley-scout (v2.2)
 # Flow-aware own-side scouting. See docs/scouting-flow.md
 # Setter quality is DERIVED from pass (reception/dig) + attack outcomes — not logged on set.
 
-version: "2.1"
+version: "2.2"
 schema: action_outcome_grid
 
 actions:
@@ -11,9 +11,12 @@ actions:
     outcomes:
       - id: ace
         label: Ace
-      - id: in_play
-        label: In play
-        note: Rally continues — next own touch is dig/block
+      - id: in_play_in_system
+        label: In play — in system
+        note: Serve in; receiving team stays in system (easier). Next own touch dig/block
+      - id: in_play_out_of_system
+        label: In play — out of system
+        note: Serve in; receiving team out of system (pressure). Next own touch dig/block
       - id: serve_error
         label: Serve error
 

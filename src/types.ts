@@ -81,7 +81,7 @@ export type GridAction = {
 }
 
 export type ActionOutcomeGrid = {
-  /** Grid revision, e.g. `"2.1"`. */
+  /** Grid revision, e.g. `"2.2"`. */
   version: number | string
   schema: string
   actions: GridAction[]

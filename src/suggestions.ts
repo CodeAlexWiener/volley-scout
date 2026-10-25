@@ -112,12 +112,14 @@ export function suggestNext(
         alternates: [],
       }
     }
-    if (outcome === 'in_play') {
+    if (outcome === 'in_play_in_system' || outcome === 'in_play_out_of_system') {
+      const tone =
+        outcome === 'in_play_in_system' ? 'in system' : 'out of system'
       return digAndBlock(
         roster,
         match,
-        'Serve in play — dig when ball returns',
-        'Serve in play — block (front row)',
+        `Serve in play (${tone}) — dig when ball returns`,
+        `Serve in play (${tone}) — block (front row)`,
       )
     }
     if (outcome === 'serve_error') {

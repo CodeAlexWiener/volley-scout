@@ -29,11 +29,12 @@ No Läufer / generic hitter. Legacy `läufer` / `hitter` / `other` import as `ou
 - **out_of_system** → set without forcing setter
 - After set → attack by front-row slot: **P4 outside**, **P2 opposite (or outside)**, **P3 middle**; setter may dump
 
-## Updated action → outcome grid (v2.1)
+## Updated action → outcome grid (v2.2)
 
 ### serve
 - `ace` → we keep serve → **suggest same player serve again**
-- `in_play` → rally on → **suggest dig/block** when ball returns (not reception)
+- `in_play_in_system` → serve in, opponent stays in system → **suggest dig/block** when ball returns
+- `in_play_out_of_system` → serve in, opponent under pressure / out of system → **suggest dig/block** when ball returns
 - `serve_error` → side-out → **suggest reception** (they will serve; our next touch is pass)
 
 ### reception (Annahme — only after opponent serve)
@@ -75,7 +76,7 @@ Same as reception: `in_system` | `out_of_system` | `overpass` | `error` (no perf
 | Last event | Suggest next |
 | --- | --- |
 | serve/ace | same player + serve |
-| serve/in_play | front-row → block; back-row → dig |
+| serve/in_play_in_system \| in_play_out_of_system | front-row → block; back-row → dig |
 | serve/serve_error | reception (back-row / outside preferred) |
 | reception/in_system | setter + set (do not prefill in/out on set) |
 | reception/out_of_system | set, player unconstrained |

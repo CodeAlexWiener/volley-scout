@@ -1,11 +1,11 @@
 import type { ActionOutcomeGrid } from '../types'
 
 /**
- * In-app copy of data/action-outcome-grid.yaml (v2.1).
+ * In-app copy of data/action-outcome-grid.yaml (v2.2).
  * Keep in sync when editing the YAML source of truth.
  */
 export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
-  version: '2.1',
+  version: '2.2',
   schema: 'action_outcome_grid',
   actions: [
     {
@@ -14,9 +14,14 @@ export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
       outcomes: [
         { id: 'ace', label: 'Ace' },
         {
-          id: 'in_play',
-          label: 'In play',
-          note: 'Rally continues — next own touch is dig/block',
+          id: 'in_play_in_system',
+          label: 'In play — in system',
+          note: 'Serve in; receiving team stays in system (easier). Next own touch dig/block',
+        },
+        {
+          id: 'in_play_out_of_system',
+          label: 'In play — out of system',
+          note: 'Serve in; receiving team out of system (pressure). Next own touch dig/block',
         },
         { id: 'serve_error', label: 'Serve error' },
       ],
