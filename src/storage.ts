@@ -25,6 +25,12 @@ function normalizeRole(raw: unknown): PlayerRole | undefined {
   return mapped && ROLES.has(mapped) ? mapped : undefined
 }
 
+function normalizeNumber(raw: unknown): string | undefined {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return undefined
+  const trimmed = String(raw).trim().replace(/^#/, '')
+  return /^\d{1,2}$/.test(trimmed) ? trimmed : undefined
+}
+
 function normalizePlayer(raw: Partial<RosterPlayer> & { id: string; name: string }): RosterPlayer {
   const role = normalizeRole(raw.role)
   const startingPosition = isCourtPosition(raw.startingPosition)
@@ -35,6 +41,36 @@ function normalizePlayer(raw: Partial<RosterPlayer> & { id: string; name: string
     name: raw.name,
     role,
     startingPosition,
+    number: normalizeNumber(raw.number),
+  }
+}
+
+function normalizeEvent(raw: unknown): ScoutEvent | null {
+  if (!raw || typeof raw !== 'object') return null
+  const event = raw as Partial<ScoutEvent>
+  if (typeof event.id !== 'string' || typeof event.playerId !== 'string') return null
+  if (typeof event.action !== 'string' || typeof event.outcome !== 'string') return null
+  if (typeof event.t !== 'number' || !Number.isFinite(event.t)) return null
+  const source = event.source === 'ai' ? 'ai' : 'human'
+  const status =
+    event.status === 'proposed' || event.status === 'rejected' || event.status === 'accepted'
+      ? event.status
+      : 'accepted'
+  const note = typeof event.note === 'string' && event.note.trim() ? event.note.trim() : undefined
+  const pointId = typeof event.pointId === 'string' && event.pointId ? event.pointId : undefined
+  const priorEventId =
+    typeof event.priorEventId === 'string' && event.priorEventId ? event.priorEventId : undefined
+  return {
+    id: event.id,
+    playerId: event.playerId,
+    action: event.action,
+    outcome: event.outcome,
+    t: event.t,
+    source,
+    status,
+    note,
+    pointId,
+    priorEventId,
   }
 }
 
@@ -75,8 +111,11 @@ function normalizeSession(parsed: Record<string, unknown>): MatchSession {
     roster,
     bindings: Array.isArray(parsed.bindings) ? (parsed.bindings as MatchSession['bindings']) : [],
     currentPlayerId: typeof parsed.currentPlayerId === 'string' ? parsed.currentPlayerId : null,
-    events: Array.isArray(parsed.events) ? (parsed.events as ScoutEvent[]) : [],
+    events: Array.isArray(parsed.events)
+      ? parsed.events.map(normalizeEvent).filter((event): event is ScoutEvent => event !== null)
+      : [],
     match: normalizeMatch(parsed.match as Partial<MatchState> | undefined, roster),
+    scoreboardBurnedIn: parsed.scoreboardBurnedIn === true,
     updatedAt: new Date().toISOString(),
   }
 }
@@ -152,11 +191,13 @@ export function exportSessionJson(session: MatchSession): string {
   const cleaned: MatchSession = {
     ...session,
     version: 2,
-    roster: session.roster.map(({ id, name, role, startingPosition }) => ({
+    scoreboardBurnedIn: session.scoreboardBurnedIn === true,
+    roster: session.roster.map(({ id, name, role, startingPosition, number }) => ({
       id,
       name,
       role,
       startingPosition,
+      ...(number ? { number } : {}),
     })),
     updatedAt: new Date().toISOString(),
   }

@@ -205,6 +205,24 @@
   flex: 1 1 8rem;
 }
 
+.roster-form input.num-input {
+  flex: 0 0 3.2rem;
+}
+
+.check-line {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.55rem 0 0.2rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+.check-line input {
+  width: auto;
+  margin: 0;
+}
+
 
 .panel label {
   display: grid;
@@ -282,6 +300,23 @@
   padding: 0.1rem 0.35rem;
   border-radius: 0.25rem;
   font-weight: 700;
+}
+
+.badge.proposed {
+  background: var(--sand);
+  color: var(--navy);
+}
+
+.event-list li.proposed {
+  background: color-mix(in oklab, var(--sand) 12%, transparent);
+}
+
+.event-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 0.4rem 0.2rem;
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 .row-actions {

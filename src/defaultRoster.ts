@@ -28,6 +28,7 @@ export function defaultSession(): MatchSession {
       positions: positionsFromRoster(roster),
       servingTeam: 'us',
     },
+    scoreboardBurnedIn: false,
     updatedAt: new Date().toISOString(),
   }
 }
