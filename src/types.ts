@@ -16,12 +16,13 @@ export type RosterPlayer = {
   role?: PlayerRole
   /** Starting lineup slot (1–6). */
   startingPosition?: CourtPosition
+  /** Jersey number, when the shirt shows one. Optional context for analysis. */
+  number?: string
 }
 
 /**
- * Verified (or future AI-proposed) touch event.
- * v1 UI only creates source=human, status=accepted.
- * source=ai and status=proposed|rejected are reserved for a later plug-in.
+ * Touch event. The mask writes source=human, status=accepted.
+ * The analysis pipeline writes source=ai, status=proposed until you accept or edit it.
  */
 export type EventSource = 'human' | 'ai'
 export type EventStatus = 'proposed' | 'accepted' | 'rejected'
@@ -55,6 +56,12 @@ export type ScoutEvent = {
   t: number
   source: EventSource
   status: EventStatus
+  /** Rally this touch belongs to. Set by the analysis pipeline. */
+  pointId?: string
+  /** Previous touch in the same rally, for derived setter stats. */
+  priorEventId?: string
+  /** Why a proposed touch needs a look, or what the model saw. */
+  note?: string
 }
 
 /** Live rotation / serve possession (own side only). */
@@ -76,6 +83,11 @@ export type MatchSession = {
   currentPlayerId: string | null
   events: ScoutEvent[]
   match: MatchState
+  /**
+   * Per match. On: the analysis pipeline may read a burned-in scoreboard.
+   * Off: it never looks for one. Missing on old sessions means off.
+   */
+  scoreboardBurnedIn?: boolean
   updatedAt: string
 }
 

@@ -59,15 +59,22 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 type RosterDraft = {
   name: string
+  number: string
   role: '' | PlayerRole
   startingPosition: '' | CourtPosition
 }
 
 const emptyDraft = (): RosterDraft => ({
   name: '',
+  number: '',
   role: '',
   startingPosition: '',
 })
+
+function draftNumber(raw: string): string | undefined {
+  const trimmed = raw.trim().replace(/^#/, '')
+  return /^\d{1,2}$/.test(trimmed) ? trimmed : undefined
+}
 
 export default function App() {
   const [session, setSession] = useState<MatchSession>(() => loadSession())
@@ -183,10 +190,11 @@ export default function App() {
     if (!name) return
     const role = rosterDraft.role || undefined
     const startingPosition = rosterDraft.startingPosition || undefined
+    const number = draftNumber(rosterDraft.number)
     if (editPlayerId) {
       updateSession((s) => {
         const roster = s.roster.map((p) =>
-          p.id === editPlayerId ? { ...p, name, role, startingPosition } : p,
+          p.id === editPlayerId ? { ...p, name, role, startingPosition, number } : p,
         )
         return {
           ...s,
@@ -202,6 +210,7 @@ export default function App() {
       const player: RosterPlayer = {
         id: newId('pl'),
         name,
+        number,
         role,
         startingPosition,
       }
@@ -224,6 +233,7 @@ export default function App() {
     setEditPlayerId(player.id)
     setRosterDraft({
       name: player.name,
+      number: player.number ?? '',
       role: player.role ?? '',
       startingPosition: player.startingPosition ?? '',
     })
@@ -396,6 +406,8 @@ export default function App() {
                 action: actionId,
                 outcome: outcomeId,
                 t,
+                source: e.source ?? 'human',
+                status: 'accepted',
               }
             : e,
         ),
@@ -423,6 +435,15 @@ export default function App() {
         events: [...s.events, event].sort((a, b) => a.t - b.t),
       }
     })
+  }
+
+  function acceptEvent(id: string) {
+    updateSession((s) => ({
+      ...s,
+      events: s.events.map((event) =>
+        event.id === id ? { ...event, status: 'accepted' } : event,
+      ),
+    }))
   }
 
   function loadEventForEdit(event: ScoutEvent) {
@@ -697,6 +718,21 @@ export default function App() {
               {session.videoName ? ` · ${session.videoName}` : ''}
             </span>
           </div>
+          <label className="check-line">
+            <input
+              type="checkbox"
+              checked={session.scoreboardBurnedIn === true}
+              onChange={(e) =>
+                updateSession((s) => ({ ...s, scoreboardBurnedIn: e.target.checked }))
+              }
+            />
+            Scoreboard burned in
+          </label>
+          <p className="hint">
+            Set this before you export. On lets analysis read the graphic. Off skips it. Put
+            the starting lineup, score, and serving side on the match as they are at the start
+            of the file.
+          </p>
           <p className="hint">
             Grid: ←→↑↓ · Enter log · Tab primary · Esc clear · Backspace/U undo · Space
             play/pause · Seek B/N ±5s · V/M ±1min · ⌘/Ctrl+Enter mark form
@@ -795,6 +831,15 @@ export default function App() {
                 onChange={(e) => setRosterDraft((d) => ({ ...d, name: e.target.value }))}
                 onKeyDown={(e) => e.key === 'Enter' && addOrUpdatePlayer()}
               />
+              <input
+                className="num-input"
+                placeholder="#"
+                inputMode="numeric"
+                aria-label="Jersey number"
+                value={rosterDraft.number}
+                onChange={(e) => setRosterDraft((d) => ({ ...d, number: e.target.value }))}
+                onKeyDown={(e) => e.key === 'Enter' && addOrUpdatePlayer()}
+              />
               <select
                 value={rosterDraft.role}
                 onChange={(e) =>
@@ -866,6 +911,7 @@ export default function App() {
                       }
                     >
                       <span>{player.name}</span>
+                      {player.number && <span className="meta-chip">#{player.number}</span>}
                       {player.role && (
                         <span className="meta-chip">{roleLabel(player.role)}</span>
                       )}
@@ -949,15 +995,21 @@ export default function App() {
           </section>
 
           <section className="panel log">
-            <h2>Verified event log ({sortedEvents.length})</h2>
+            <h2>Event log ({sortedEvents.length})</h2>
             <ul className="event-list">
               {sortedEvents.length === 0 && (
                 <li className="muted">No events yet — scrub and mark touches.</li>
               )}
               {sortedEvents.map((event) => {
                 const player = resolveEventPlayer(event.playerId, session.roster)
+                const proposed = event.status === 'proposed'
                 return (
-                  <li key={event.id} className={editingId === event.id ? 'editing' : undefined}>
+                  <li
+                    key={event.id}
+                    className={[editingId === event.id ? 'editing' : '', proposed ? 'proposed' : '']
+                      .filter(Boolean)
+                      .join(' ') || undefined}
+                  >
                     <button
                       type="button"
                       className="event-main"
@@ -973,8 +1025,18 @@ export default function App() {
                         {labelForOutcome(event.action, event.outcome)}
                       </span>
                       <span className="src">{event.source}</span>
+                      {proposed && (
+                        <span className="badge proposed" title={event.note}>
+                          proposed
+                        </span>
+                      )}
                     </button>
                     <div className="row-actions">
+                      {proposed && (
+                        <button type="button" className="ghost" onClick={() => acceptEvent(event.id)}>
+                          Accept
+                        </button>
+                      )}
                       <button type="button" className="ghost" onClick={() => loadEventForEdit(event)}>
                         Edit
                       </button>
@@ -986,6 +1048,7 @@ export default function App() {
                         Del
                       </button>
                     </div>
+                    {event.note && <p className="event-note">{event.note}</p>}
                   </li>
                 )
               })}
@@ -1114,7 +1177,11 @@ function CourtSlot({
         .join(' ')}
       onClick={() => playerId && onPick(playerId)}
       disabled={!playerId}
-      title={player ? `${playerLabel(player)}${player.role ? ` · ${roleLabel(player.role)}` : ''}` : `P${pos} empty`}
+      title={
+        player
+          ? `${player.number ? `#${player.number} ` : ''}${playerLabel(player)}${player.role ? ` · ${roleLabel(player.role)}` : ''}`
+          : `P${pos} empty`
+      }
     >
       <span className="slot-top">
         <span className="slot-pos">P{pos}</span>
