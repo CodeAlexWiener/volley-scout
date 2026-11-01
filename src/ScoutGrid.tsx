@@ -1,4 +1,6 @@
-import { isCellEnabled, type CandidateGrid, type FocusCell, type GridColumn } from './candidates'
+import type { CandidateGrid, FocusCell, GridColumn } from './candidates'
+import { suggestedOutcomeIndex } from './candidates'
+import { labelForOutcome } from './data/grid'
 import { playerLabel } from './format'
 import { isOpponentPlayerId, type RosterPlayer } from './types'
 
@@ -13,7 +15,7 @@ type Props = {
 }
 
 export function ScoutGrid({ grid, focus, onFocusChange, onLog, disabled }: Props) {
-  if (grid.players.length === 0 || grid.columns.length === 0) {
+  if (grid.choices.length === 0) {
     return (
       <div className="scout-grid empty" aria-live="polite">
         <p className="muted">No candidates — set roster / serving side.</p>
@@ -21,90 +23,83 @@ export function ScoutGrid({ grid, focus, onFocusChange, onLog, disabled }: Props
     )
   }
 
+  const expandedIndex =
+    focus?.groupIndex ?? Math.max(0, grid.choices.findIndex((choice) => choice.primary))
+
   return (
     <div
       className={`scout-grid${disabled ? ' disabled' : ''}`}
-      role="grid"
-      aria-label="Scout candidates — arrows move, Enter logs"
       aria-disabled={disabled || undefined}
     >
       {grid.reason && (
         <div className="scout-grid-reason" aria-live="polite">
           {grid.reason}
-          <span className="scout-grid-keys">
-            ←→↑↓ move · Enter log · Tab primary · Esc clear
-          </span>
+          <span className="scout-grid-keys">↑↓ touch · ←→ outcome · Enter logs</span>
         </div>
       )}
-      <div className="scout-grid-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th scope="col" className="player-col">
-                Player
-              </th>
-              {grid.columns.map((col) => (
-                <th
-                  key={`${col.action}-${col.outcome}`}
-                  scope="col"
-                  title={`${col.action} / ${col.outcome}`}
-                  className={col.action === 'opponent_error' ? 'opp-col' : undefined}
+      <div className="scout-choices" role="list" aria-label="Scout touches">
+        {grid.choices.map((choice, groupIndex) => {
+          const expanded = groupIndex === expandedIndex
+          const opponent = isOpponentPlayerId(choice.player.id)
+          const headFocused = focus?.groupIndex === groupIndex
+          return (
+            <div
+              key={`${choice.player.id}-${choice.action}`}
+              className={[
+                'scout-choice',
+                expanded ? 'expanded' : '',
+                choice.primary ? 'primary' : '',
+                opponent ? 'opponent' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              role="listitem"
+            >
+              <button
+                type="button"
+                className="scout-choice-head"
+                aria-expanded={expanded}
+                disabled={disabled}
+                onClick={() =>
+                  onFocusChange({
+                    groupIndex,
+                    outcomeIndex: suggestedOutcomeIndex(choice),
+                  })
+                }
+              >
+                <span className="who">{playerLabel(choice.player)}</span>
+                <span className="act">{choice.actionLabel}</span>
+              </button>
+              {expanded && (
+                <div
+                  className="scout-outcomes"
+                  role="group"
+                  aria-label={`${playerLabel(choice.player)} ${choice.actionLabel} outcomes`}
                 >
-                  {col.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {grid.players.map((player, ri) => {
-              const opponentRow = isOpponentPlayerId(player.id)
-              return (
-                <tr key={player.id} className={opponentRow ? 'opponent-row' : undefined}>
-                  <th scope="row" className="player-col">
-                    {playerLabel(player)}
-                  </th>
-                  {grid.columns.map((col, ci) => {
-                    const enabled = isCellEnabled(player.id, col)
-                    const focused =
-                      focus?.rowIndex === ri && focus?.columnIndex === ci
-                    const isDefault =
-                      grid.defaultFocus?.playerId === player.id &&
-                      grid.defaultFocus?.columnIndex === ci
+                  {choice.outcomes.map((column, outcomeIndex) => {
+                    const focused = headFocused && focus?.outcomeIndex === outcomeIndex
                     return (
-                      <td key={`${col.action}-${col.outcome}`}>
-                        <button
-                          type="button"
-                          className={[
-                            'scout-cell',
-                            focused ? 'focused' : '',
-                            isDefault && !focused ? 'default-hint' : '',
-                            !enabled ? 'unavailable' : '',
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
-                          disabled={disabled || !enabled}
-                          aria-label={`${playerLabel(player)} ${col.action} ${col.outcome}`}
-                          aria-current={focused ? 'true' : undefined}
-                          onClick={() => {
-                            if (!enabled) return
-                            onFocusChange({ rowIndex: ri, columnIndex: ci })
-                            onLog(player, col)
-                          }}
-                          onFocus={() => {
-                            if (!enabled) return
-                            onFocusChange({ rowIndex: ri, columnIndex: ci })
-                          }}
-                        >
-                          {!enabled ? '·' : focused ? '●' : isDefault ? '○' : '·'}
-                        </button>
-                      </td>
+                      <button
+                        key={column.outcome}
+                        type="button"
+                        className={['scout-outcome', focused ? 'focused' : ''].filter(Boolean).join(' ')}
+                        disabled={disabled}
+                        aria-current={focused ? 'true' : undefined}
+                        title={labelForOutcome(choice.action, column.outcome)}
+                        onClick={() => {
+                          onFocusChange({ groupIndex, outcomeIndex })
+                          onLog(choice.player, column)
+                        }}
+                      >
+                        {column.label}
+                      </button>
                     )
                   })}
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

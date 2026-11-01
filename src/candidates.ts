@@ -24,9 +24,24 @@ export type GridColumn = {
   label: string
 }
 
+/**
+ * One scout row: a player and a single action.
+ * Outcomes stay hidden until that row is selected.
+ */
+export type ScoutChoice = {
+  player: RosterPlayer
+  action: string
+  actionLabel: string
+  outcomes: GridColumn[]
+  primary: boolean
+  suggestedOutcome: string | null
+}
+
 export type CandidateGrid = {
   players: RosterPlayer[]
   columns: GridColumn[]
+  /** Player × action rows. Outcomes expand on the selected row. */
+  choices: ScoutChoice[]
   /** Primary suggestion cell — default keyboard focus. */
   defaultFocus: { playerId: string; columnIndex: number } | null
   /** Flow reason from the primary suggestion (for UI hint). */
@@ -47,10 +62,10 @@ function shortOutcomeLabel(actionId: string, outcomeId: string): string {
     in_play_in_system: 'InSys',
     in_play_out_of_system: 'OutSys',
     serve_error: 'Err',
-    in_system: 'InSys',
-    out_of_system: 'OutSys',
+    in_system: 'In sys',
+    out_of_system: 'Out sys',
     overpass: 'Over',
-    error: 'Err',
+    error: 'Error',
     set: 'Set',
     save: 'Save',
     kill: 'Kill',
@@ -261,6 +276,87 @@ function mergePlayers(
   return out
 }
 
+function actionMeta(actionId: string): { label: string; outcomes: GridColumn[] } {
+  const action = ACTION_OUTCOME_GRID.actions.find((a) => a.id === actionId)
+  return {
+    label: action?.label ?? actionId,
+    outcomes: columnsForActions([actionId]),
+  }
+}
+
+function opponentChoice(): ScoutChoice {
+  return {
+    player: OPPONENT_PLAYER,
+    action: 'opponent_error',
+    actionLabel: 'Error',
+    outcomes: actionMeta('opponent_error').outcomes,
+    primary: false,
+    suggestedOutcome: null,
+  }
+}
+
+/**
+ * Group the matrix by touch: each row is one player + one action.
+ * Players are only paired with actions they are actually candidates for
+ * (server for serve, back row for dig, front row for block, …), not with
+ * every outcome column. Opponent error stays one row of its own.
+ */
+function buildChoices(
+  suggestion: FlowSuggestion,
+  roster: RosterPlayer[],
+  match: MatchState,
+): ScoutChoice[] {
+  const choices: ScoutChoice[] = []
+  const seen = new Set<string>()
+  const options = [suggestion.primary, ...suggestion.alternates]
+  for (const option of options) {
+    const meta = actionMeta(option.action)
+    if (meta.outcomes.length === 0) continue
+    const players = playersForAction(option.action, roster, match, option.playerId)
+    for (const player of players) {
+      if (isOpponentPlayerId(player.id)) continue
+      const key = `${player.id}:${option.action}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      choices.push({
+        player,
+        action: option.action,
+        actionLabel: meta.label,
+        outcomes: meta.outcomes,
+        primary: false,
+        suggestedOutcome: null,
+      })
+    }
+  }
+
+  const primaryId = suggestion.primary.playerId
+  for (const choice of choices) {
+    if (choice.action !== suggestion.primary.action) continue
+    if (primaryId && choice.player.id !== primaryId) continue
+    choice.primary = true
+    choice.suggestedOutcome = suggestion.primary.outcome
+    break
+  }
+  if (!choices.some((choice) => choice.primary) && choices[0]) {
+    choices[0].primary = true
+    choices[0].suggestedOutcome = suggestion.primary.outcome
+  }
+  const primaryAt = choices.findIndex((choice) => choice.primary)
+  if (primaryAt > 0) {
+    const [choice] = choices.splice(primaryAt, 1)
+    if (choice) choices.unshift(choice)
+  }
+  choices.push(opponentChoice())
+  return choices
+}
+
+export function suggestedOutcomeIndex(choice: ScoutChoice): number {
+  if (choice.outcomes.length === 0) return 0
+  if (!choice.suggestedOutcome) return 0
+  const index = choice.outcomes.findIndex((outcome) => outcome.outcome === choice.suggestedOutcome)
+  return index >= 0 ? index : 0
+}
+
 function defaultColumnIndex(
   columns: GridColumn[],
   primary: SuggestionOption | undefined,
@@ -290,9 +386,11 @@ export function getCandidateGrid(
     // Still offer Opponent escape hatch when roster exists but suggestion is null
     if (roster.length > 0) {
       const { players, columns } = withOpponentEscapeHatch([], [])
+      const choices = [opponentChoice()]
       return {
         players,
         columns,
+        choices,
         defaultFocus: players[0]
           ? { playerId: players[0].id, columnIndex: 0 }
           : null,
@@ -303,6 +401,7 @@ export function getCandidateGrid(
     return {
       players: [],
       columns: [],
+      choices: [],
       defaultFocus: null,
       reason: null,
       suggestion: null,
@@ -313,11 +412,13 @@ export function getCandidateGrid(
   const baseColumns = columnsForActions(options.map((o) => o.action))
   const basePlayers = mergePlayers(options, roster, match)
   const { players, columns } = withOpponentEscapeHatch(basePlayers, baseColumns)
+  const choices = buildChoices(suggestion, roster, match)
 
   if (players.length === 0 || columns.length === 0) {
     return {
       players,
       columns,
+      choices,
       defaultFocus: null,
       reason: suggestion.primary.reason,
       suggestion,
@@ -338,6 +439,7 @@ export function getCandidateGrid(
   return {
     players,
     columns,
+    choices,
     defaultFocus:
       focusPlayerId != null
         ? { playerId: focusPlayerId, columnIndex: colIndex }
@@ -348,59 +450,25 @@ export function getCandidateGrid(
 }
 
 export type FocusCell = {
-  rowIndex: number
-  columnIndex: number
+  groupIndex: number
+  outcomeIndex: number
 }
 
-/** Clamp / resolve focus when the grid rebuilds; prefer an enabled cell. */
+/** Snap keyboard focus to the primary player + action, on its suggested outcome. */
 export function resolveFocus(
   grid: CandidateGrid,
-  prev: FocusCell | null,
+  _prev: FocusCell | null,
 ): FocusCell | null {
-  if (grid.players.length === 0 || grid.columns.length === 0) return null
-
-  const clamp = (cell: FocusCell): FocusCell => ({
-    rowIndex: Math.min(Math.max(0, cell.rowIndex), grid.players.length - 1),
-    columnIndex: Math.min(Math.max(0, cell.columnIndex), grid.columns.length - 1),
-  })
-
-  const enabledOrNearest = (cell: FocusCell): FocusCell => {
-    const c = clamp(cell)
-    const player = grid.players[c.rowIndex]
-    const column = grid.columns[c.columnIndex]
-    if (player && column && isCellEnabled(player.id, column)) return c
-    // Prefer same row, first enabled column
-    for (let ci = 0; ci < grid.columns.length; ci++) {
-      if (player && isCellEnabled(player.id, grid.columns[ci]!)) {
-        return { rowIndex: c.rowIndex, columnIndex: ci }
-      }
-    }
-    // Any enabled cell
-    for (let ri = 0; ri < grid.players.length; ri++) {
-      for (let ci = 0; ci < grid.columns.length; ci++) {
-        if (isCellEnabled(grid.players[ri]!.id, grid.columns[ci]!)) {
-          return { rowIndex: ri, columnIndex: ci }
-        }
-      }
-    }
-    return c
-  }
-
-  if (grid.defaultFocus) {
-    const rowIndex = grid.players.findIndex((p) => p.id === grid.defaultFocus!.playerId)
-    if (rowIndex >= 0) {
-      return enabledOrNearest({
-        rowIndex,
-        columnIndex: grid.defaultFocus.columnIndex,
-      })
-    }
-  }
-  if (prev) return enabledOrNearest(prev)
-  return enabledOrNearest({ rowIndex: 0, columnIndex: 0 })
+  if (grid.choices.length === 0) return null
+  const found = grid.choices.findIndex((choice) => choice.primary)
+  const groupIndex = found >= 0 ? found : 0
+  const choice = grid.choices[groupIndex]
+  if (!choice) return null
+  return { groupIndex, outcomeIndex: suggestedOutcomeIndex(choice) }
 }
 
 /**
- * Move focus by delta, skipping disabled (roster×opponent_error / Opponent×own) cells.
+ * Up/down moves between player–action rows. Left/right moves among that row's outcomes.
  */
 export function moveFocusSkippingDisabled(
   grid: CandidateGrid,
@@ -408,34 +476,19 @@ export function moveFocusSkippingDisabled(
   dRow: number,
   dCol: number,
 ): FocusCell {
-  const rows = grid.players.length
-  const cols = grid.columns.length
-  if (rows === 0 || cols === 0) return from
+  const count = grid.choices.length
+  if (count === 0) return from
 
-  let row = from.rowIndex
-  let col = from.columnIndex
-  const maxSteps = rows * cols
-  for (let step = 0; step < maxSteps; step++) {
-    if (dRow !== 0) {
-      row = (row + dRow + rows) % rows
-      // When changing row, land on first enabled column in that row (prefer keep col)
-      if (isCellEnabled(grid.players[row]!.id, grid.columns[col]!)) {
-        return { rowIndex: row, columnIndex: col }
-      }
-      for (let offset = 0; offset < cols; offset++) {
-        const ci = (col + offset) % cols
-        if (isCellEnabled(grid.players[row]!.id, grid.columns[ci]!)) {
-          return { rowIndex: row, columnIndex: ci }
-        }
-      }
-    } else if (dCol !== 0) {
-      col = (col + dCol + cols) % cols
-      if (isCellEnabled(grid.players[row]!.id, grid.columns[col]!)) {
-        return { rowIndex: row, columnIndex: col }
-      }
-    } else {
-      break
-    }
+  if (dRow !== 0) {
+    const groupIndex = (from.groupIndex + dRow + count) % count
+    const choice = grid.choices[groupIndex]
+    if (!choice) return from
+    return { groupIndex, outcomeIndex: suggestedOutcomeIndex(choice) }
   }
-  return from
+
+  const choice = grid.choices[from.groupIndex]
+  if (!choice || choice.outcomes.length === 0) return from
+  const len = choice.outcomes.length
+  const outcomeIndex = (from.outcomeIndex + dCol + len) % len
+  return { groupIndex: from.groupIndex, outcomeIndex }
 }
