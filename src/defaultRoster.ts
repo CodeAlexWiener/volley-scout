@@ -1,4 +1,4 @@
-import type { MatchSession, RosterPlayer } from './types'
+import { emptyGameWindow, type MatchSession, type RosterPlayer } from './types'
 import { emptyMatchState, positionsFromRoster } from './rotation'
 
 /**
@@ -28,6 +28,7 @@ export function defaultSession(): MatchSession {
       positions: positionsFromRoster(roster),
       servingTeam: 'us',
     },
+    gameWindow: emptyGameWindow(),
     updatedAt: new Date().toISOString(),
   }
 }

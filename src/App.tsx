@@ -10,14 +10,18 @@ import { ACTION_OUTCOME_GRID, labelForAction, labelForOutcome } from './data/gri
 import { formatTime, playerLabel, resolveEventPlayer } from './format'
 import {
   applyPossessionChange,
-  playerAt,
   positionOf,
   positionsFromRoster,
   possessionAfterEvent,
   rotateClockwise,
+  servingOrder,
 } from './rotation'
+import { buildRallyClips, toEditManifest } from './clips'
 import { defaultSession } from './defaultRoster'
+import { loadEditProject, saveEditProject } from './editDb'
+import { parseProposalFile, understandingPrompt, type ActionProposal } from './proposals'
 import { ScoutGrid } from './ScoutGrid'
+import { Studio } from './Studio'
 import {
   exportSessionJson,
   loadSession,
@@ -84,21 +88,16 @@ export default function App() {
   const [suggestion, setSuggestion] = useState<FlowSuggestion | null>(null)
   const [gridFocus, setGridFocus] = useState<FocusCell | null>(null)
   const [gridActive, setGridActive] = useState(true)
-  /** Bumps on rotate so court slots re-animate. */
-  const [courtPulse, setCourtPulse] = useState(0)
+  const [mode, setMode] = useState<'scout' | 'studio'>('scout')
+  const [proposals, setProposals] = useState<ActionProposal[]>([])
+  const [importErrors, setImportErrors] = useState<string[]>([])
+  const [editReady, setEditReady] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
   const undoStackRef = useRef<UndoSnapshot[]>([])
   const sessionRef = useRef(session)
   sessionRef.current = session
-  const positionsSig = useMemo(
-    () => COURT_POSITIONS.map((p) => session.match.positions[p] ?? '').join('|'),
-    [session.match.positions],
-  )
-  useEffect(() => {
-    setCourtPulse((n) => n + 1)
-  }, [positionsSig])
 
   const outcomes = useMemo(() => {
     return ACTION_OUTCOME_GRID.actions.find((a) => a.id === actionId)?.outcomes ?? []
@@ -169,6 +168,13 @@ export default function App() {
     const v = videoRef.current
     if (!v) return
     v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + delta))
+  }
+
+  function seekTo(time: number) {
+    const v = videoRef.current
+    if (!v) return
+    const limit = Number.isFinite(v.duration) ? v.duration : time
+    v.currentTime = Math.max(0, Math.min(limit, time))
   }
 
   function togglePlay() {
@@ -327,11 +333,11 @@ export default function App() {
 
   function logFocusedCell(): boolean {
     if (!gridActive || !gridFocus || editingId) return false
-    const player = candidateGrid.players[gridFocus.rowIndex]
-    const column = candidateGrid.columns[gridFocus.columnIndex]
-    if (!player || !column) return false
-    if (!isCellEnabled(player.id, column)) return false
-    return logCell(player.id, column.action, column.outcome)
+    const choice = candidateGrid.choices[gridFocus.groupIndex]
+    const column = choice?.outcomes[gridFocus.outcomeIndex]
+    if (!choice || !column) return false
+    if (!isCellEnabled(choice.player.id, column)) return false
+    return logCell(choice.player.id, column.action, column.outcome)
   }
 
   function onGridLog(player: RosterPlayer, column: GridColumn) {
@@ -364,10 +370,10 @@ export default function App() {
   }
 
   function moveGridFocus(dRow: number, dCol: number) {
-    if (candidateGrid.players.length === 0 || candidateGrid.columns.length === 0) return
+    if (candidateGrid.choices.length === 0) return
     setGridActive(true)
     setGridFocus((prev) => {
-      const base = prev ?? resolveFocus(candidateGrid, null) ?? { rowIndex: 0, columnIndex: 0 }
+      const base = prev ?? resolveFocus(candidateGrid, null) ?? { groupIndex: 0, outcomeIndex: 0 }
       return moveFocusSkippingDisabled(candidateGrid, base, dRow, dCol)
     })
   }
@@ -440,6 +446,84 @@ export default function App() {
   function deleteEvent(id: string) {
     updateSession((s) => ({ ...s, events: s.events.filter((e) => e.id !== id) }))
     if (editingId === id) setEditingId(null)
+  }
+
+  function setGameEdge(edge: 'start' | 'end', value: number | null) {
+    updateSession((current) => ({
+      ...current,
+      gameWindow: { ...current.gameWindow, [edge]: value },
+    }))
+  }
+
+  function downloadJson(filename: string, body: string) {
+    const blob = new Blob([body], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function downloadManifest() {
+    const manifest = toEditManifest(session.videoName, session.gameWindow, rallyClips)
+    const stem = session.videoName?.replace(/\W+/g, '_') ?? 'edit'
+    downloadJson(`volley-edit-${stem}.json`, JSON.stringify(manifest, null, 2))
+  }
+
+  function downloadPrompt() {
+    const body = understandingPrompt(session.roster, session.gameWindow)
+    const blob = new Blob([body], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'volley-understand.txt'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function onImportProposals(file: File | undefined) {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const parsed = parseProposalFile(String(reader.result), session.roster)
+      setImportErrors(parsed.errors)
+      if (parsed.proposals.length > 0) {
+        setProposals((current) => [...parsed.proposals, ...current])
+      }
+    }
+    reader.readAsText(file)
+  }
+
+  function acceptProposal(id: string) {
+    const proposal = proposals.find((item) => item.id === id)
+    if (!proposal || proposal.status !== 'proposed' || !proposal.playerId) return
+    const event: ScoutEvent = {
+      id: newId('ev'),
+      playerId: proposal.playerId,
+      action: proposal.action,
+      outcome: proposal.outcome,
+      t: proposal.t,
+      source: 'ai',
+      status: 'accepted',
+    }
+    pushUndoSnapshot()
+    updateSession((current) => ({
+      ...current,
+      events: [...current.events, event].sort((a, b) => a.t - b.t),
+      currentPlayerId: isOpponentPlayerId(event.playerId)
+        ? current.currentPlayerId
+        : event.playerId,
+    }))
+    setProposals((current) =>
+      current.map((item) => (item.id === id ? { ...item, status: 'accepted' } : item)),
+    )
+  }
+
+  function rejectProposal(id: string) {
+    setProposals((current) =>
+      current.map((item) => (item.id === id ? { ...item, status: 'rejected' } : item)),
+    )
   }
 
   function downloadExport() {
@@ -531,14 +615,14 @@ export default function App() {
         return
       }
 
-      if (e.key === 'Tab' && !editingId && candidateGrid.players.length > 0) {
+      if (e.key === 'Tab' && !editingId && candidateGrid.choices.length > 0) {
         e.preventDefault()
         jumpToPrimaryFocus()
         return
       }
 
       // Grid navigation (plain arrows — never steal for seek)
-      if (!editingId && gridActive && candidateGrid.players.length > 0) {
+      if (mode === 'scout' && !editingId && gridActive && candidateGrid.choices.length > 0) {
         if (e.key === 'ArrowLeft') {
           e.preventDefault()
           moveGridFocus(0, -1)
@@ -590,12 +674,50 @@ export default function App() {
     candidateGrid,
     gridFocus,
     gridActive,
+    mode,
   ])
 
   const sortedEvents = useMemo(
     () => [...session.events].sort((a, b) => a.t - b.t),
     [session.events],
   )
+
+  const rallyClips = useMemo(
+    () => buildRallyClips(session.events, session.roster, session.gameWindow, duration),
+    [session.events, session.roster, session.gameWindow, duration],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    setEditReady(false)
+    const videoName = session.videoName ?? 'untitled'
+    void loadEditProject(videoName)
+      .then((project) => {
+        if (cancelled) return
+        setProposals(project?.proposals ?? [])
+        setEditReady(true)
+      })
+      .catch(() => {
+        if (!cancelled) setEditReady(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [session.videoName])
+
+  useEffect(() => {
+    if (!editReady) return
+    const videoName = session.videoName ?? 'untitled'
+    void saveEditProject({
+      videoName,
+      gameWindow: session.gameWindow,
+      clips: rallyClips,
+      proposals,
+      updatedAt: new Date().toISOString(),
+    }).catch(() => {
+      /* The session still holds the window if IndexedDB is unavailable. */
+    })
+  }, [editReady, session.videoName, session.gameWindow, rallyClips, proposals])
 
   return (
     <div className="app">
@@ -608,6 +730,26 @@ export default function App() {
           </div>
         </div>
         <div className="top-actions">
+          <div className="mode-switch" role="tablist" aria-label="Workspace">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'scout'}
+              className={mode === 'scout' ? 'primary' : 'ghost'}
+              onClick={() => setMode('scout')}
+            >
+              Scout
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'studio'}
+              className={mode === 'studio' ? 'primary' : 'ghost'}
+              onClick={() => setMode('studio')}
+            >
+              Studio
+            </button>
+          </div>
           <button type="button" className="ghost" onClick={() => fileInputRef.current?.click()}>
             {session.videoName ? 'Change video' : 'Load video'}
           </button>
@@ -698,13 +840,100 @@ export default function App() {
             </span>
           </div>
           <p className="hint">
-            Grid: ←→↑↓ · Enter log · Tab primary · Esc clear · Backspace/U undo · Space
-            play/pause · Seek B/N ±5s · V/M ±1min · ⌘/Ctrl+Enter mark form
+            Scout: ↑↓ touch · ←→ outcome · Enter log · Tab primary · Esc clear · Backspace/U
+            undo · Space play/pause · Seek B/N ±5s · V/M ±1min · ⌘/Ctrl+Enter mark form
           </p>
 
+          <section className="panel prep-panel">
+            <div className="panel-head">
+              <h2>Game window</h2>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() =>
+                  updateSession((current) => ({ ...current, gameWindow: { start: null, end: null } }))
+                }
+              >
+                Clear
+              </button>
+            </div>
+            <div className="prep-grid">
+              <label>
+                Start (seconds)
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={session.gameWindow.start ?? ''}
+                  placeholder="file start"
+                  onChange={(event) => {
+                    const raw = event.target.value
+                    setGameEdge('start', raw === '' ? null : Number(raw))
+                  }}
+                />
+              </label>
+              <button type="button" onClick={() => setGameEdge('start', currentTime)}>
+                Set start at playhead
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                disabled={session.gameWindow.start == null}
+                onClick={() => seekTo(session.gameWindow.start ?? 0)}
+              >
+                Go to start
+              </button>
+              <label>
+                End (seconds)
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={session.gameWindow.end ?? ''}
+                  placeholder="file end"
+                  onChange={(event) => {
+                    const raw = event.target.value
+                    setGameEdge('end', raw === '' ? null : Number(raw))
+                  }}
+                />
+              </label>
+              <button type="button" onClick={() => setGameEdge('end', currentTime)}>
+                Set end at playhead
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                disabled={session.gameWindow.end == null}
+                onClick={() => seekTo(session.gameWindow.end ?? 0)}
+              >
+                Go to end
+              </button>
+            </div>
+            {session.gameWindow.start != null &&
+              session.gameWindow.end != null &&
+              session.gameWindow.end <= session.gameWindow.start && (
+                <p className="hint warn">End has to be after start.</p>
+              )}
+          </section>
+
+          {mode === 'studio' ? (
+            <Studio
+              videoName={session.videoName}
+              gameWindow={session.gameWindow}
+              duration={duration}
+              clips={rallyClips}
+              proposals={proposals}
+              importErrors={importErrors}
+              onImport={onImportProposals}
+              onAccept={acceptProposal}
+              onReject={rejectProposal}
+              onExportManifest={downloadManifest}
+              onExportPrompt={downloadPrompt}
+            />
+          ) : (
           <section className="panel match-panel">
             <div className="match-head">
-              <h2>Match · rotation</h2>
+              <h2>Serve order</h2>
               <div className="score-line">
                 <label>
                   Us
@@ -766,24 +995,26 @@ export default function App() {
                 Apply starting P1–P6
               </button>
             </div>
-            <CourtDiagram
+            <ServeOrder
               session={session}
-              pulseKey={courtPulse}
               onPick={(playerId) =>
                 updateSession((s) => ({ ...s, currentPlayerId: playerId }))
               }
             />
-            <p className="hint">
-              Our half · front P2–P4 / back P5–P6–P1 · P1 serves when we have serve. Attack
-              suggest: P4 outside, P2 opposite/outside, P3 middle. Auto-rotates on side-out.
-            </p>
+            <p className="hint">Serve order. Rotate when we earn the serve.</p>
           </section>
+          )}
         </section>
 
+        {mode === 'scout' && (
         <aside className="side">
-          <section className="panel">
-            <div className="panel-head">
+          <details className="panel roster-fold">
+            <summary className="roster-summary">
               <h2>Roster</h2>
+            </summary>
+            <div className="roster-body">
+            <div className="panel-head">
+              <span className="muted">{session.roster.length} players</span>
               <button type="button" className="ghost" onClick={resetToDefaultRoster}>
                 Reset roster
               </button>
@@ -888,10 +1119,11 @@ export default function App() {
                 )
               })}
             </ul>
-          </section>
+            </div>
+          </details>
 
           <section className="panel entry">
-            <h2>{editingId ? 'Edit event' : 'Scout grid'}</h2>
+            <h2>{editingId ? 'Edit event' : 'Scout'}</h2>
             {!editingId && (
               <ScoutGrid
                 grid={candidateGrid}
@@ -908,6 +1140,7 @@ export default function App() {
               <strong>{playerLabel(currentPlayer, 'select a player')}</strong>
               {' · '}t = <strong>{formatTime(currentTime)}</strong>
             </p>
+            <p className="hint override-label">Manual override</p>
             <label>
               Action
               <select value={actionId} onChange={(e) => setActionId(e.target.value)}>
@@ -992,6 +1225,7 @@ export default function App() {
             </ul>
           </section>
         </aside>
+        )}
       </main>
     </div>
   )
@@ -1001,130 +1235,41 @@ function roleLabel(role: PlayerRole): string {
   return PLAYER_ROLES.find((r) => r.id === role)?.label ?? role
 }
 
-function roleShort(role: PlayerRole | undefined): string {
-  if (!role) return ''
-  if (role === 'setter') return 'S'
-  if (role === 'outside') return 'OH'
-  if (role === 'opposite') return 'OPP'
-  return 'MB'
-}
-
-function CourtDiagram({
-  session,
-  pulseKey,
-  onPick,
-}: {
-  session: MatchSession
-  pulseKey: number
-  onPick: (playerId: string) => void
-}) {
-  const weServe = session.match.servingTeam === 'us'
-  return (
-    <div className="court-wrap" aria-label="Our side court positions P1–P6">
-      <div className="court-banner">
-        <span>Our side</span>
-        <span className={weServe ? 'serve-pill on' : 'serve-pill'}>
-          {weServe ? 'We serve · P1' : 'They serve'}
-        </span>
-      </div>
-      <div className="court" data-pulse={pulseKey}>
-        <svg className="court-lines" viewBox="0 0 300 220" aria-hidden>
-          <rect x="8" y="8" width="284" height="204" rx="4" className="court-outline" />
-          <line x1="8" y1="18" x2="292" y2="18" className="court-net-line" />
-          <text x="150" y="14" textAnchor="middle" className="court-svg-label">
-            Net
-          </text>
-          {/* Attack line between front and back */}
-          <line x1="8" y1="112" x2="292" y2="112" className="court-attack-line" />
-          <text x="16" y="106" className="court-svg-label muted-svg">
-            Attack line
-          </text>
-          <text x="16" y="40" className="court-svg-label muted-svg">
-            Front
-          </text>
-          <text x="16" y="200" className="court-svg-label muted-svg">
-            Back
-          </text>
-        </svg>
-        <div className="court-slots">
-          <div className="court-row front" aria-label="Front row P4 P3 P2">
-            {([4, 3, 2] as CourtPosition[]).map((pos) => (
-              <CourtSlot
-                key={`${pos}-${pulseKey}`}
-                pos={pos}
-                row="front"
-                session={session}
-                onPick={onPick}
-              />
-            ))}
-          </div>
-          <div className="court-row back" aria-label="Back row P5 P6 P1">
-            {([5, 6, 1] as CourtPosition[]).map((pos) => (
-              <CourtSlot
-                key={`${pos}-${pulseKey}`}
-                pos={pos}
-                row="back"
-                session={session}
-                onPick={onPick}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-      <div className="court-legend">
-        <span>
-          <i className="leg front" /> Front P2–P4
-        </span>
-        <span>
-          <i className="leg back" /> Back P5–P6–P1
-        </span>
-        <span>
-          <i className="leg server" /> Server
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function CourtSlot({
-  pos,
-  row,
+function ServeOrder({
   session,
   onPick,
 }: {
-  pos: CourtPosition
-  row: 'front' | 'back'
   session: MatchSession
   onPick: (playerId: string) => void
 }) {
-  const playerId = playerAt(session.match.positions, pos)
-  const player = session.roster.find((p) => p.id === playerId)
-  const isServer = session.match.servingTeam === 'us' && pos === 1
+  const order = servingOrder(session.match)
   return (
-    <button
-      type="button"
-      className={[
-        'court-slot',
-        row,
-        isServer ? 'server' : '',
-        playerId === session.currentPlayerId ? 'active' : '',
-        playerId ? '' : 'empty',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-      onClick={() => playerId && onPick(playerId)}
-      disabled={!playerId}
-      title={player ? `${playerLabel(player)}${player.role ? ` · ${roleLabel(player.role)}` : ''}` : `P${pos} empty`}
-    >
-      <span className="slot-top">
-        <span className="slot-pos">P{pos}</span>
-        {isServer && <span className="server-tag">Serve</span>}
-        {player?.role && <span className="slot-role">{roleShort(player.role)}</span>}
-      </span>
-      <span className="slot-body">
-        <span className="slot-name">{player ? player.name : '—'}</span>
-      </span>
-    </button>
+    <ol className="serve-order" aria-label="Serving order">
+      {order.map((slot, index) => {
+        const player = slot.playerId
+          ? session.roster.find((p) => p.id === slot.playerId)
+          : undefined
+        const active = slot.playerId != null && slot.playerId === session.currentPlayerId
+        return (
+          <li key={`${slot.position}-${slot.playerId ?? 'empty'}`}>
+            <button
+              type="button"
+              className={['serve-slot', slot.marker ?? '', active ? 'active' : '']
+                .filter(Boolean)
+                .join(' ')}
+              disabled={!slot.playerId}
+              onClick={() => slot.playerId && onPick(slot.playerId)}
+              title={player?.role ? roleLabel(player.role) : `P${slot.position}`}
+            >
+              <span className="serve-index">{index + 1}</span>
+              <span className="serve-name">{player ? player.name : '—'}</span>
+              {slot.marker === 'now' && <span className="serve-marker">now</span>}
+              {slot.marker === 'next' && <span className="serve-marker next">next</span>}
+            </button>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 

@@ -11,6 +11,9 @@ node_modules
 dist
 dist-ssr
 *.local
+studio/out
+studio/public
+studio/.remotion
 
 # Editor directories and files
 .vscode/*

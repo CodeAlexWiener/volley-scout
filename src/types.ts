@@ -67,6 +67,14 @@ export type MatchState = {
   scoreThem: number
 }
 
+/** In/out of the match inside the loaded file. Null means the file edge. */
+export type GameWindow = {
+  start: number | null
+  end: number | null
+}
+
+export const emptyGameWindow = (): GameWindow => ({ start: null, end: null })
+
 export type MatchSession = {
   version: 2
   videoName: string | null
@@ -76,6 +84,8 @@ export type MatchSession = {
   currentPlayerId: string | null
   events: ScoutEvent[]
   match: MatchState
+  /** Preparation: where the played game starts and ends in the file. */
+  gameWindow: GameWindow
   updatedAt: string
 }
 

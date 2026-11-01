@@ -1,12 +1,14 @@
 import { defaultSession } from './defaultRoster'
 import { emptyMatchState, positionsFromRoster } from './rotation'
-import type {
-  CourtPosition,
-  MatchSession,
-  MatchState,
-  PlayerRole,
-  RosterPlayer,
-  ScoutEvent,
+import {
+  emptyGameWindow,
+  type CourtPosition,
+  type GameWindow,
+  type MatchSession,
+  type MatchState,
+  type PlayerRole,
+  type RosterPlayer,
+  type ScoutEvent,
 } from './types'
 import { LEGACY_ROLE_MAP } from './types'
 
@@ -61,6 +63,14 @@ function normalizeMatch(raw: Partial<MatchState> | undefined, roster: RosterPlay
   }
 }
 
+function normalizeGameWindow(raw: unknown): GameWindow {
+  if (!raw || typeof raw !== 'object') return emptyGameWindow()
+  const window = raw as Partial<GameWindow>
+  const start = typeof window.start === 'number' && Number.isFinite(window.start) ? window.start : null
+  const end = typeof window.end === 'number' && Number.isFinite(window.end) ? window.end : null
+  return { start, end }
+}
+
 function normalizeSession(parsed: Record<string, unknown>): MatchSession {
   const rosterRaw = Array.isArray(parsed.roster) ? parsed.roster : []
   const roster = rosterRaw
@@ -77,6 +87,7 @@ function normalizeSession(parsed: Record<string, unknown>): MatchSession {
     currentPlayerId: typeof parsed.currentPlayerId === 'string' ? parsed.currentPlayerId : null,
     events: Array.isArray(parsed.events) ? (parsed.events as ScoutEvent[]) : [],
     match: normalizeMatch(parsed.match as Partial<MatchState> | undefined, roster),
+    gameWindow: normalizeGameWindow(parsed.gameWindow),
     updatedAt: new Date().toISOString(),
   }
 }

@@ -61,6 +61,34 @@ export function rotateClockwise(
   return next
 }
 
+export type ServeSlot = {
+  position: CourtPosition
+  playerId: string | undefined
+  /** Where this player sits in our upcoming serve sequence. */
+  marker: 'now' | 'next' | null
+}
+
+/**
+ * Short serving order. While we serve, P1 is serving now and P2 is next.
+ * While they serve, the next side-out rotates P2 into the serve, so the list starts there.
+ */
+export function servingOrder(match: MatchState): ServeSlot[] {
+  const sequence: CourtPosition[] =
+    match.servingTeam === 'us' ? [1, 2, 3, 4, 5, 6] : [2, 3, 4, 5, 6, 1]
+  return sequence.map((position, index) => ({
+    position,
+    playerId: match.positions[position],
+    marker:
+      index === 0
+        ? match.servingTeam === 'us'
+          ? 'now'
+          : 'next'
+        : index === 1 && match.servingTeam === 'us'
+          ? 'next'
+          : null,
+  }))
+}
+
 export function playerAt(
   positions: Partial<Record<CourtPosition, string>>,
   pos: CourtPosition,
