@@ -27,7 +27,7 @@ export function RallyTimeline({ duration, window, rallies, events, covered, curr
   const current = rallyAt(rallies, currentTime)
   const detailStart = Math.max(0, Math.min(currentTime - DETAIL_HALF_SEC, duration - DETAIL_HALF_SEC * 2))
   const detailEnd = Math.min(duration, detailStart + DETAIL_HALF_SEC * 2)
-  const decided = new Map(rallies.map((r) => [r.id, rallyDecided(r, events)]))
+  const decided = new Map(rallies.map((r) => [r.id, rallyDecided(r, events, rallies)]))
   // Only rallies you have already scouted past (before your latest entry) count as missing a winner.
   const lastEntry = events.reduce((max, e) => Math.max(max, e.t), -1)
   const unfinished = rallies.filter((r) => r.end < lastEntry && !decided.get(r.id)).length

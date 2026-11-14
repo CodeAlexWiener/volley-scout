@@ -1,6 +1,8 @@
 # Flow-aware scouting (own side only)
 
-We never log opponent touches. After each event, the UI suggests the **next likely own-side action + player** from volleyball rules + rotation.
+We never log opponent touches. After each entry, the grid moves to the next **situation** (we serve, they serve, second touch, attack, ball comes over) and pre-selects the **likely player** from rotation and roles. The full grid is in [action-outcome-grid.md](action-outcome-grid.md); the logic is in `src/flow.ts`.
+
+> Sections below that mention grid v2 action names (dump, error_own, recycle…) describe the earlier grid; those names are converted on load.
 
 ## Roles
 

@@ -1073,3 +1073,175 @@ kbd {
     margin-left: 0;
   }
 }
+
+/* ── Two-step scout grid ───────────────────────────────── */
+.situation-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.35rem;
+}
+
+.situation-tabs button {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.situation-tabs button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--court);
+  font-weight: 700;
+}
+
+.grid-rows {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.grid-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  align-items: start;
+  gap: 0.35rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 0.35rem;
+  border: 1px solid transparent;
+}
+
+.grid-row.focused {
+  border-color: color-mix(in oklab, var(--accent) 60%, transparent);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+
+.grid-row.opponent,
+.grid-row.team {
+  background: color-mix(in oklab, var(--navy) 35%, transparent);
+}
+
+.grid-row.opponent {
+  margin-top: 0.3rem;
+}
+
+.grid-who {
+  display: grid;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding-top: 0.2rem;
+}
+
+.grid-row.likely .grid-who::after {
+  content: 'likely';
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.grid-who small {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.grid-choices,
+.grid-step-two {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.grid-step-two {
+  grid-column: 2;
+  padding: 0.3rem;
+  border-radius: 0.35rem;
+  background: color-mix(in oklab, var(--sand) 14%, transparent);
+  border: 1px solid color-mix(in oklab, var(--sand) 50%, transparent);
+}
+
+.grid-choice,
+.grid-step-two button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.76rem;
+  border-radius: 0.3rem;
+  border: 1px solid var(--line);
+  background: color-mix(in oklab, var(--court) 60%, transparent);
+  color: var(--ink);
+}
+
+.grid-choice.focused,
+.grid-step-two button.focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.grid-choice.open {
+  background: color-mix(in oklab, var(--sand) 25%, transparent);
+  border-color: var(--sand);
+}
+
+/* Replay sits furthest from the normal choices. */
+.grid-choice.far {
+  margin-left: auto;
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.grid-choice .more {
+  color: var(--muted);
+}
+
+.grid-choice kbd,
+.grid-step-two kbd {
+  min-width: 1em;
+  font-size: 0.68rem;
+}
+
+.set-scores {
+  display: inline-flex;
+  gap: 0.35rem;
+  margin-left: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.set-scores .won {
+  color: var(--accent);
+}
+
+.set-scores .lost {
+  color: var(--sand);
+}
+
+.banner.set-end {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+}
+
+.banner.set-end p {
+  margin: 0.3rem 0;
+}
+
+.set-end-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  margin-top: 0.35rem;
+}
+
+.set-end-choices > span {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.sub-select {
+  max-width: 8.5rem;
+  font-size: 0.75rem;
+}

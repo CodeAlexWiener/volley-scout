@@ -28,13 +28,17 @@ Open `http://localhost:5173`. One command starts both the app and a small local 
 | Key | Does |
 |---|---|
 | Space | play / pause |
-| ←→↑↓, Enter, Tab, Esc | scout grid (unchanged) |
+| ↑↓ | grid: choose the player row (the likely player is pre-selected) |
+| 1–5 (or ←→ + Enter) | grid: step 1, then step 2 (Enter = first detail) |
+| Esc | grid: back out of step 2 |
+| , / . | grid: switch situation by hand |
 | Backspace / U | undo |
 | B / N, V / M | seek ±5 s, ±1 min |
 | **P** / **O** | point us / point them (when the deciding touch is not tracked) |
 | **[** | rally starts here (in dead time: add a missed rally) |
 | **]** | rally ends here (in dead time: extend the previous rally) |
 | **K** | split the rally here (two rallies merged into one) |
+| **J** | join this rally with the next (one rally cut in two) |
 | **X** | not a rally |
 | **G** | skip dead time on / off |
 
@@ -53,20 +57,22 @@ On a real 85-minute fixed-camera match, 60-second pieces with `gemini-3.5-flash-
 
 Override the model with `GEMINI_MODEL=...` in `.env`. Gemini's free tier is enough for one match at a time; on the free tier Google may use uploaded content to improve its products (outside the EEA/UK/CH).
 
-## Action → outcome grid (v2.5)
+## Scout grid (v3, two steps)
 
-Machine-readable source of truth: [`data/action-outcome-grid.yaml`](data/action-outcome-grid.yaml). Explainer: [`docs/action-outcome-grid.md`](docs/action-outcome-grid.md). Flow: [`docs/scouting-flow.md`](docs/scouting-flow.md).
+The full grid with every option and what it does to the score: [`docs/action-outcome-grid.md`](docs/action-outcome-grid.md). Machine-readable vocabulary: [`data/action-outcome-grid.yaml`](data/action-outcome-grid.yaml).
 
-Actions: serve, reception, dig, second_touch (`set`|`save`|`error_own`|`error_tried_save`), attack, dump, block, freeball_send, opponent_error. Pass quality lives on reception/dig; setter analytics are derived later. `rally_point` (`us`|`them`) is a marker outside the grid for points whose deciding touch is not tracked.
+The grid follows the rally through five situations (we serve, they serve, second touch, attack, ball comes over). Each has player rows plus an **Opponent** row and a **Team** row (Down, Fault, Replay). Sets end automatically at 25 (15 in set 3) with a two-point lead. Substitutions are made from the roster ("Sub in for…"). Matches saved with the old grid are converted when they are opened.
 
 ## Event schema
 
 ```ts
 {
   id: string
-  playerId: string // roster id, "__opponent__" for opponent_error, "__team__" for rally_point
-  action: string   // grid action id, or "rally_point"
-  outcome: string  // grid outcome id for that action
+  playerId: string // roster id, "__opponent__" for opponent_error, "__team__" for team / rally_point
+  action: string   // grid action id, "rally_point" (P/O) or "substitution"
+  outcome: string  // grid outcome id; for substitution, the id of the player going off
+  detail?: string  // step-2 detail id, e.g. "tip_dump"
+  set?: number     // set number the entry was logged in
   t: number        // seconds in the video file
   source: "human"
   status: "accepted"

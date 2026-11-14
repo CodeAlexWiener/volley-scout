@@ -1,4 +1,4 @@
-import { possessionAfterEvent } from './rotation'
+import { pointWinner } from './rotation'
 import { newId } from './storage'
 import type { Rally, ScoutEvent, Span } from './types'
 
@@ -43,18 +43,32 @@ export function gapAround(rallies: Rally[], t: number, bounds: Span): Span {
   return { start: prev?.end ?? bounds.start, end: next?.start ?? bounds.end }
 }
 
-/** Does the rally contain an event that decides the point? */
-export function rallyDecided(rally: Span, events: ScoutEvent[]): boolean {
-  return events.some(
-    (e) =>
-      e.t >= rally.start - EVENT_SLACK_SEC &&
-      e.t <= rally.end + EVENT_SLACK_SEC &&
-      possessionAfterEvent(e.action, e.outcome, 'us').kind !== 'rally_continues',
-  )
+/**
+ * The rally an entry at time t belongs to: the one containing t, else the nearest
+ * one within EVENT_SLACK_SEC (a late keypress right after the ball died).
+ */
+export function rallyFor(rallies: Rally[], t: number): Rally | null {
+  const inside = rallyAt(rallies, t)
+  if (inside) return inside
+  let best: Rally | null = null
+  let bestDistance = EVENT_SLACK_SEC
+  for (const r of rallies) {
+    const distance = t < r.start ? r.start - t : t - r.end
+    if (distance <= bestDistance) {
+      best = r
+      bestDistance = distance
+    }
+  }
+  return best
 }
 
-export function rallyEvents(rally: Span, events: ScoutEvent[]): ScoutEvent[] {
-  return events.filter((e) => e.t >= rally.start - EVENT_SLACK_SEC && e.t <= rally.end + EVENT_SLACK_SEC)
+export function rallyEvents(rally: Rally, events: ScoutEvent[], rallies: Rally[]): ScoutEvent[] {
+  return events.filter((e) => rallyFor(rallies, e.t)?.id === rally.id)
+}
+
+/** Does the rally contain an entry that decides it (a point or a replay)? */
+export function rallyDecided(rally: Rally, events: ScoutEvent[], rallies: Rally[]): boolean {
+  return rallyEvents(rally, events, rallies).some((e) => pointWinner(e.action, e.outcome, e.detail) !== null)
 }
 
 function overlap(a: Span, b: Span): number {
@@ -127,4 +141,16 @@ export function removeRally(rallies: Rally[], t: number): { rallies: Rally[]; di
     rallies: rallies.filter((r) => r.id !== current.id),
     dismissed: current.source === 'ai' ? { start: current.start, end: current.end } : null,
   }
+}
+
+/** `J`: the AI split one rally in two; join this rally (or the one just before) with the next. */
+export function joinWithNext(rallies: Rally[], t: number): Rally[] {
+  const current = rallyAt(rallies, t) ?? previousRallyBefore(rallies, t)
+  if (!current) return rallies
+  const next = nextRallyAfter(rallies, current.start)
+  if (!next) return rallies
+  return sortRallies([
+    ...rallies.filter((r) => r.id !== current.id && r.id !== next.id),
+    { id: current.id, start: current.start, end: Math.max(current.end, next.end), source: 'human' },
+  ])
 }
