@@ -1,12 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  getCandidateGrid,
-  isCellEnabled,
-  moveFocusSkippingDisabled,
-  resolveFocus,
-} from './candidates'
-import type { FocusCell, GridColumn } from './candidates'
-import { ACTION_OUTCOME_GRID, labelForAction, labelForOutcome } from './data/grid'
+import { ACTION_OUTCOME_GRID } from './data/grid'
 import {
   cancelCut,
   getCut,
@@ -20,13 +13,15 @@ import {
   type CutJobView,
   type Health,
 } from './api'
-import { eventWhat, formatTime, playerLabel, resolveEventPlayer } from './format'
+import { formatTime, playerLabel, resolveEventPlayer } from './format'
 import { MatchSetup, type CopyState } from './MatchSetup'
 import {
   mergeAiRallies,
   nextRallyAfter,
   rallyAt,
+  joinWithNext,
   rallyDecided,
+  rallyFor,
   removeRally,
   setRallyEnd,
   setRallyStart,
@@ -39,11 +34,13 @@ import {
   playerAt,
   positionOf,
   positionsFromRoster,
+  isSetOver,
+  pointWinner,
   possessionAfterEvent,
   rotateClockwise,
 } from './rotation'
 import { defaultSession, emptyMatchFields } from './defaultRoster'
-import { ScoutGrid } from './ScoutGrid'
+import { ScoutGrid, type GridPick } from './ScoutGrid'
 import {
   exportSessionJson,
   loadSession,
@@ -51,18 +48,16 @@ import {
   parseImportedSession,
   saveSession,
 } from './storage'
-import { suggestNext } from './suggestions'
+import { defaultPlayer, describeEvent, gridPlayers, lastBallEvent, nextSituation, type Situation } from './flow'
 import type {
   CourtPosition,
   CutState,
-  FlowSuggestion,
   MatchSession,
   PlayerRole,
   Rally,
   RosterPlayer,
   ScoutEvent,
   Span,
-  SuggestionOption,
 } from './types'
 import {
   COURT_POSITIONS,
@@ -70,6 +65,7 @@ import {
   OPPONENT_PLAYER_ID,
   PLAYER_ROLES,
   RALLY_POINT_ACTION,
+  SUBSTITUTION_ACTION,
   TEAM_PLAYER_ID,
 } from './types'
 import './App.css'
@@ -78,6 +74,7 @@ type UndoSnapshot = {
   events: ScoutEvent[]
   match: MatchSession['match']
   currentPlayerId: string | null
+  sets: MatchSession['sets']
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -112,9 +109,6 @@ export default function App() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [rosterDraft, setRosterDraft] = useState<RosterDraft>(emptyDraft)
   const [editPlayerId, setEditPlayerId] = useState<string | null>(null)
-  const [suggestion, setSuggestion] = useState<FlowSuggestion | null>(null)
-  const [gridFocus, setGridFocus] = useState<FocusCell | null>(null)
-  const [gridActive, setGridActive] = useState(true)
   /** Bumps on rotate so court slots re-animate. */
   const [courtPulse, setCourtPulse] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -298,7 +292,7 @@ export default function App() {
       }
       const left = lastRallyIdRef.current ? s.rallies.find((r) => r.id === lastRallyIdRef.current) : null
       lastRallyIdRef.current = null
-      if (left && t >= left.end && !rallyDecided(left, s.events) && !unfinishedShownRef.current.has(left.id)) {
+      if (left && t >= left.end && !rallyDecided(left, s.events, s.rallies) && !unfinishedShownRef.current.has(left.id)) {
         unfinishedShownRef.current.add(left.id)
         v.pause()
         setUnfinished(left)
@@ -329,8 +323,8 @@ export default function App() {
 
   // Clear the "no point winner" banner as soon as the rally is decided.
   useEffect(() => {
-    if (unfinished && rallyDecided(unfinished, session.events)) setUnfinished(null)
-  }, [unfinished, session.events])
+    if (unfinished && rallyDecided(unfinished, session.events, session.rallies)) setUnfinished(null)
+  }, [unfinished, session.events, session.rallies])
   const positionsSig = useMemo(
     () => COURT_POSITIONS.map((p) => session.match.positions[p] ?? '').join('|'),
     [session.match.positions],
@@ -365,36 +359,21 @@ export default function App() {
 
   const currentPlayer = session.roster.find((p) => p.id === session.currentPlayerId)
 
-  const lastEvent = useMemo(() => {
-    if (session.events.length === 0) return null
-    return [...session.events].sort((a, b) => a.t - b.t).at(-1) ?? null
-  }, [session.events])
-
-  const candidateGrid = useMemo(() => {
-    if (editingId) {
-      return getCandidateGrid(null, [], session.match)
-    }
-    return getCandidateGrid(lastEvent, session.roster, session.match)
-  }, [lastEvent, session.roster, session.match, editingId])
-
-  // Recompute suggestion when match/events change (not while editing an old event).
-  useEffect(() => {
-    if (editingId) {
-      setSuggestion(null)
-      return
-    }
-    setSuggestion(candidateGrid.suggestion ?? suggestNext(lastEvent, session.roster, session.match))
-  }, [candidateGrid, lastEvent, session.roster, session.match, editingId])
-
-  // After each log / state change, snap focus to the new primary suggestion cell.
-  useEffect(() => {
-    if (editingId) {
-      setGridFocus(null)
-      return
-    }
-    setGridFocus((prev) => resolveFocus(candidateGrid, prev))
-    setGridActive(true)
-  }, [candidateGrid, editingId])
+  // Situation follows the rally (last ball entry + score state); a manual switch
+  // holds only until the next entry.
+  const ballLast = useMemo(() => lastBallEvent(session.events), [session.events])
+  const flowSituation = useMemo(() => nextSituation(ballLast, session.match), [ballLast, session.match])
+  const [situationOverride, setSituationOverride] = useState<{ situation: Situation; after: string | null } | null>(null)
+  const situation =
+    situationOverride && situationOverride.after === (ballLast?.id ?? null) ? situationOverride.situation : flowSituation
+  const courtPlayers = useMemo(() => gridPlayers(session.roster, session.match), [session.roster, session.match])
+  const likelyPlayer = useMemo(
+    () => defaultPlayer(situation, ballLast, session.roster, session.match),
+    [situation, ballLast, session.roster, session.match],
+  )
+  /** Set that just ended; the dialog asks who serves and which lineup starts the next. */
+  const [setEnd, setSetEnd] = useState<{ set: number; us: number; them: number } | null>(null)
+  const currentSet = session.sets.length + 1
 
   function onPickVideo(file: File | undefined) {
     if (!file) return
@@ -467,22 +446,7 @@ export default function App() {
 
   /** P / O: the point went to us / them, when the deciding touch is not one you track. */
   function logPoint(winner: 'us' | 'them') {
-    const t = videoRef.current?.currentTime ?? currentTime
-    const event: ScoutEvent = {
-      id: newId('ev'),
-      playerId: TEAM_PLAYER_ID,
-      action: RALLY_POINT_ACTION,
-      outcome: winner,
-      t,
-      source: 'human',
-      status: 'accepted',
-    }
-    pushUndoSnapshot()
-    updateSession((s) => ({
-      ...s,
-      match: applyPossessionChange(s.match, possessionAfterEvent(RALLY_POINT_ACTION, winner, s.match.servingTeam)),
-      events: [...s.events, event].sort((a, b) => a.t - b.t),
-    }))
+    logEvent({ playerId: TEAM_PLAYER_ID, action: RALLY_POINT_ACTION, outcome: winner, t: videoRef.current?.currentTime ?? currentTime })
   }
 
   function seekBy(delta: number) {
@@ -507,17 +471,16 @@ export default function App() {
     function onKey(e: KeyboardEvent) {
       if (isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return
       const key = e.key.toLowerCase()
-      if (setupOpenRef.current) {
-        if (key === 's' || key === 'e') {
-          e.preventDefault()
-          markWindow(key === 's' ? 'start' : 'end')
-        }
+      if (setupOpenRef.current && (key === 's' || key === 'e')) {
+        e.preventDefault()
+        markWindow(key === 's' ? 'start' : 'end')
         return
       }
       const actions: Record<string, () => void> = {
         '[': () => editRallies(setRallyStart),
         ']': () => editRallies((rallies, t) => setRallyEnd(rallies, t)),
         k: () => editRallies((rallies, t) => splitRally(rallies, t)),
+        j: () => editRallies((rallies, t) => joinWithNext(rallies, t)),
         x: dropRallyHere,
         g: () => updateSession((s) => ({ ...s, skipDeadTime: !s.skipDeadTime })),
         p: () => logPoint('us'),
@@ -620,80 +583,111 @@ export default function App() {
     }))
   }
 
-  function resolveOutcome(action: string, preferred: string | null): string | null {
-    if (preferred) return preferred
-    return ACTION_OUTCOME_GRID.actions.find((a) => a.id === action)?.outcomes[0]?.id ?? null
-  }
-
   function pushUndoSnapshot() {
     const s = sessionRef.current
     undoStackRef.current.push({
       events: s.events,
       match: s.match,
       currentPlayerId: s.currentPlayerId,
+      sets: s.sets,
     })
     if (undoStackRef.current.length > 100) undoStackRef.current.shift()
   }
 
-  /** Log player + action + outcome at the video playhead. */
-  function logCell(playerId: string, action: string, outcome: string): boolean {
+  /**
+   * The one way entries are logged (grid, P/O, mark form). Applies score and
+   * rotation, warns before a second deciding entry in one rally, and opens the
+   * set-end dialog when the set is won.
+   */
+  function logEvent(entry: { playerId: string; action: string; outcome: string; detail?: string; t: number }): boolean {
     if (editingId) return false
-    if (!playerId || !action || !outcome) return false
-    if (action === 'opponent_error' && !isOpponentPlayerId(playerId)) return false
-    if (action !== 'opponent_error' && isOpponentPlayerId(playerId)) return false
-
-    const t = videoRef.current?.currentTime ?? currentTime
+    const s = sessionRef.current
+    const winner = pointWinner(entry.action, entry.outcome, entry.detail)
+    if (winner !== null) {
+      const rally = rallyFor(s.rallies, entry.t)
+      if (
+        rally &&
+        rallyDecided(rally, s.events, s.rallies) &&
+        !confirm('This rally already has an entry that decided the point. Log another one anyway? The score would count twice.')
+      ) {
+        return false
+      }
+    }
     const event: ScoutEvent = {
       id: newId('ev'),
-      playerId: action === 'opponent_error' ? OPPONENT_PLAYER_ID : playerId,
-      action,
-      outcome,
-      t,
+      playerId: entry.playerId,
+      action: entry.action,
+      outcome: entry.outcome,
+      ...(entry.detail ? { detail: entry.detail } : {}),
+      t: entry.t,
       source: 'human',
       status: 'accepted',
+      set: s.sets.length + 1,
     }
+    const match = applyPossessionChange(s.match, possessionAfterEvent(entry.action, entry.outcome, s.match.servingTeam, entry.detail))
     pushUndoSnapshot()
-    updateSession((s) => {
-      const change = possessionAfterEvent(action, outcome, s.match.servingTeam)
-      const match = applyPossessionChange(s.match, change)
-      return {
-        ...s,
-        // Don't bind "current player" to the synthetic Opponent sentinel
-        currentPlayerId: isOpponentPlayerId(event.playerId)
-          ? s.currentPlayerId
-          : event.playerId,
-        match,
-        events: [...s.events, event].sort((a, b) => a.t - b.t),
-      }
+    const isPlayer = s.roster.some((p) => p.id === entry.playerId)
+    setSession({
+      ...s,
+      currentPlayerId: isPlayer ? entry.playerId : s.currentPlayerId,
+      match,
+      events: [...s.events, event].sort((a, b) => a.t - b.t),
     })
-    setActionId(action)
-    setOutcomeId(outcome)
+    setSituationOverride(null)
+    if (winner === 'us' || winner === 'them') {
+      const setNumber = s.sets.length + 1
+      if (isSetOver(match, setNumber)) setSetEnd({ set: setNumber, us: match.scoreUs, them: match.scoreThem })
+    }
     return true
   }
 
-  /**
-   * One-click / Enter: apply suggested player/action/outcome at playhead and append event.
-   * Returns true if an event was logged.
-   */
-  function logSuggestion(option: SuggestionOption): boolean {
-    const playerId = option.playerId ?? session.currentPlayerId
-    const outcome = resolveOutcome(option.action, option.outcome)
-    if (!playerId || !option.action || !outcome) return false
-    return logCell(playerId, option.action, outcome)
+  function onGridPick(pick: GridPick) {
+    const playerId =
+      pick.row.kind === 'opponent' ? OPPONENT_PLAYER_ID : pick.row.kind === 'team' ? TEAM_PLAYER_ID : pick.row.id
+    const outcome = pick.step?.outcome ?? pick.choice.outcome
+    if (!outcome) return
+    logEvent({ playerId, action: pick.choice.action, outcome, detail: pick.step?.detail, t: pick.t })
   }
 
-  function logFocusedCell(): boolean {
-    if (!gridActive || !gridFocus || editingId) return false
-    const player = candidateGrid.players[gridFocus.rowIndex]
-    const column = candidateGrid.columns[gridFocus.columnIndex]
-    if (!player || !column) return false
-    if (!isCellEnabled(player.id, column)) return false
-    return logCell(player.id, column.action, column.outcome)
+  /** Close the finished set: store its score, reset to 0–0, set server and lineup for the next one. */
+  function startNextSet(serving: 'us' | 'them', lineup: 'starting' | 'current') {
+    if (!setEnd) return
+    pushUndoSnapshot()
+    updateSession((s) => ({
+      ...s,
+      sets: [...s.sets, { us: setEnd.us, them: setEnd.them }],
+      match: {
+        ...s.match,
+        scoreUs: 0,
+        scoreThem: 0,
+        servingTeam: serving,
+        positions: lineup === 'starting' ? positionsFromRoster(s.roster) : s.match.positions,
+      },
+    }))
+    setSetEnd(null)
   }
 
-  function onGridLog(player: RosterPlayer, column: GridColumn) {
-    if (!isCellEnabled(player.id, column)) return
-    logCell(player.id, column.action, column.outcome)
+  /** Bench player `inId` replaces `outId` in the same court position. */
+  function substitute(inId: string, outId: string) {
+    const s = sessionRef.current
+    const pos = positionOf(s.match.positions, outId)
+    if (!pos) return
+    pushUndoSnapshot()
+    const event: ScoutEvent = {
+      id: newId('ev'),
+      playerId: inId,
+      action: SUBSTITUTION_ACTION,
+      outcome: outId,
+      t: videoRef.current?.currentTime ?? currentTime,
+      source: 'human',
+      status: 'accepted',
+      set: s.sets.length + 1,
+    }
+    setSession({
+      ...s,
+      match: { ...s.match, positions: { ...s.match.positions, [pos]: inId } },
+      events: [...s.events, event].sort((a, b) => a.t - b.t),
+    })
   }
 
   function undoLastEvent() {
@@ -704,8 +698,10 @@ export default function App() {
         events: snap.events,
         match: snap.match,
         currentPlayerId: snap.currentPlayerId,
+        sets: snap.sets,
       }))
       setEditingId(null)
+      setSetEnd(null)
       return
     }
     // Fallback: drop last event only (match state may drift until next log)
@@ -720,26 +716,9 @@ export default function App() {
     setEditingId(null)
   }
 
-  function moveGridFocus(dRow: number, dCol: number) {
-    if (candidateGrid.players.length === 0 || candidateGrid.columns.length === 0) return
-    setGridActive(true)
-    setGridFocus((prev) => {
-      const base = prev ?? resolveFocus(candidateGrid, null) ?? { rowIndex: 0, columnIndex: 0 }
-      return moveFocusSkippingDisabled(candidateGrid, base, dRow, dCol)
-    })
-  }
-
-  function jumpToPrimaryFocus() {
-    const next = resolveFocus(candidateGrid, null)
-    if (next) {
-      setGridActive(true)
-      setGridFocus(next)
-    }
-  }
-
   function markEvent() {
     const isOppErr = actionId === 'opponent_error'
-    const playerId = isOppErr ? OPPONENT_PLAYER_ID : session.currentPlayerId
+    const playerId = isOppErr ? OPPONENT_PLAYER_ID : actionId === 'team' ? TEAM_PLAYER_ID : session.currentPlayerId
     if (!playerId || !actionId || !outcomeId) return
     const t = videoRef.current?.currentTime ?? currentTime
     if (editingId) {
@@ -761,32 +740,13 @@ export default function App() {
       setEditingId(null)
       return
     }
-    const event: ScoutEvent = {
-      id: newId('ev'),
-      playerId,
-      action: actionId,
-      outcome: outcomeId,
-      t,
-      source: 'human',
-      status: 'accepted',
-    }
-    pushUndoSnapshot()
-    updateSession((s) => {
-      const change = possessionAfterEvent(actionId, outcomeId, s.match.servingTeam)
-      const match = applyPossessionChange(s.match, change)
-      return {
-        ...s,
-        match,
-        events: [...s.events, event].sort((a, b) => a.t - b.t),
-      }
-    })
+    logEvent({ playerId, action: actionId, outcome: outcomeId, t })
   }
 
   function loadEventForEdit(event: ScoutEvent) {
     setEditingId(event.id)
     setActionId(event.action)
     setOutcomeId(event.outcome)
-    setSuggestion(null)
     if (!isOpponentPlayerId(event.playerId)) {
       updateSession((s) => ({ ...s, currentPlayerId: event.playerId }))
     }
@@ -818,8 +778,7 @@ export default function App() {
         setSession(next)
         undoStackRef.current = []
         setEditingId(null)
-        setSuggestion(null)
-      } catch (err) {
+          } catch (err) {
         alert(err instanceof Error ? err.message : 'Import failed')
       }
     }
@@ -850,7 +809,6 @@ export default function App() {
     setSession(next)
     undoStackRef.current = []
     setEditingId(null)
-    setSuggestion(null)
     setRosterDraft(emptyDraft())
     setEditPlayerId(null)
   }
@@ -893,53 +851,6 @@ export default function App() {
         return
       }
 
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setGridActive(false)
-        return
-      }
-
-      if (e.key === 'Tab' && !editingId && candidateGrid.players.length > 0) {
-        e.preventDefault()
-        jumpToPrimaryFocus()
-        return
-      }
-
-      // Grid navigation (plain arrows — never steal for seek)
-      if (!editingId && gridActive && candidateGrid.players.length > 0) {
-        if (e.key === 'ArrowLeft') {
-          e.preventDefault()
-          moveGridFocus(0, -1)
-          return
-        }
-        if (e.key === 'ArrowRight') {
-          e.preventDefault()
-          moveGridFocus(0, 1)
-          return
-        }
-        if (e.key === 'ArrowUp') {
-          e.preventDefault()
-          moveGridFocus(-1, 0)
-          return
-        }
-        if (e.key === 'ArrowDown') {
-          e.preventDefault()
-          moveGridFocus(1, 0)
-          return
-        }
-      }
-
-      if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault()
-        if (editingId) return
-        if (logFocusedCell()) return
-        if (suggestion?.primary) {
-          logSuggestion(suggestion.primary)
-          return
-        }
-        if (session.currentPlayerId && actionId && outcomeId) markEvent()
-        return
-      }
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         markEvent()
@@ -954,10 +865,6 @@ export default function App() {
     actionId,
     outcomeId,
     editingId,
-    suggestion,
-    candidateGrid,
-    gridFocus,
-    gridActive,
   ])
 
   const sortedEvents = useMemo(
@@ -1119,7 +1026,18 @@ export default function App() {
 
           <section className="panel match-panel">
             <div className="match-head">
-              <h2>Match · rotation</h2>
+              <h2>
+                Set {currentSet}
+                {session.sets.length > 0 && (
+                  <span className="set-scores">
+                    {session.sets.map((x, i) => (
+                      <span key={i} className={x.us > x.them ? 'won' : 'lost'}>
+                        {x.us}–{x.them}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </h2>
               <div className="score-line">
                 <label>
                   Us
@@ -1288,6 +1206,21 @@ export default function App() {
                       {active && <span className="badge">current</span>}
                     </button>
                     <div className="row-actions">
+                      {!pos && courtPlayers.length > 0 && (
+                        <select
+                          className="sub-select"
+                          aria-label={`Sub ${player.name} in for`}
+                          value=""
+                          onChange={(e) => e.target.value && substitute(player.id, e.target.value)}
+                        >
+                          <option value="">Sub in for…</option>
+                          {courtPlayers.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} (P{positionOf(session.match.positions, p.id)})
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       <button type="button" className="ghost" onClick={() => startEditPlayer(player)}>
                         Edit
                       </button>
@@ -1309,13 +1242,25 @@ export default function App() {
             <h2>{editingId ? 'Edit event' : 'Scout grid'}</h2>
             {!editingId && (
               <ScoutGrid
-                grid={candidateGrid}
-                focus={gridActive ? gridFocus : null}
-                onFocusChange={(f) => {
-                  setGridActive(true)
-                  setGridFocus(f)
+                situation={situation}
+                players={courtPlayers}
+                playerMeta={(p) => {
+                  const pos = positionOf(session.match.positions, p.id)
+                  return [pos ? `P${pos}` : '', roleShort(p.role)].filter(Boolean).join(' · ')
                 }}
-                onLog={onGridLog}
+                defaultPlayerId={likelyPlayer}
+                active={!setEnd}
+                getTime={() => videoRef.current?.currentTime ?? currentTime}
+                onSituationChange={(next) => setSituationOverride({ situation: next, after: ballLast?.id ?? null })}
+                onPick={onGridPick}
+              />
+            )}
+            {setEnd && (
+              <SetEndDialog
+                setEnd={setEnd}
+                deciding={setEnd.set >= 3}
+                onNext={startNextSet}
+                onUndo={undoLastEvent}
               />
             )}
             <p className="current-line">
@@ -1384,9 +1329,9 @@ export default function App() {
                       <span className="t">{formatTime(event.t)}</span>
                       <span className="who">{playerLabel(player)}</span>
                       <span className="what">
-                        {event.action === RALLY_POINT_ACTION
-                          ? eventWhat(event.action, event.outcome, labelForOutcome)
-                          : `${labelForAction(event.action)} → ${labelForOutcome(event.action, event.outcome)}`}
+                        {event.action === SUBSTITUTION_ACTION
+                          ? `Sub, for ${playerLabel(resolveEventPlayer(event.outcome, session.roster))}`
+                          : describeEvent(event)}
                       </span>
                       <span className="src">{event.source}</span>
                     </button>
@@ -1409,6 +1354,62 @@ export default function App() {
           </section>
         </aside>
       </main>
+    </div>
+  )
+}
+
+function SetEndDialog({
+  setEnd,
+  deciding,
+  onNext,
+  onUndo,
+}: {
+  setEnd: { set: number; us: number; them: number }
+  deciding: boolean
+  onNext: (serving: 'us' | 'them', lineup: 'starting' | 'current') => void
+  onUndo: () => void
+}) {
+  const [serving, setServing] = useState<'us' | 'them'>('us')
+  const [lineup, setLineup] = useState<'starting' | 'current'>('starting')
+  const won = setEnd.us > setEnd.them
+  return (
+    <div className="banner set-end" role="dialog" aria-label={`Set ${setEnd.set} finished`}>
+      <strong>
+        Set {setEnd.set} {won ? 'won' : 'lost'} {setEnd.us}–{setEnd.them}.
+      </strong>
+      {deciding ? (
+        <p>That was the deciding set. The match is over; the score is stored with the match.</p>
+      ) : (
+        <>
+          <p>Set {setEnd.set + 1}: who serves first, and which lineup starts?</p>
+          <div className="set-end-choices">
+            <span>
+              <button type="button" className={serving === 'us' ? 'primary' : 'ghost'} onClick={() => setServing('us')}>
+                We serve
+              </button>
+              <button type="button" className={serving === 'them' ? 'primary' : 'ghost'} onClick={() => setServing('them')}>
+                They serve
+              </button>
+            </span>
+            <span>
+              <button type="button" className={lineup === 'starting' ? 'primary' : 'ghost'} onClick={() => setLineup('starting')}>
+                Starting lineup (roster P1–P6)
+              </button>
+              <button type="button" className={lineup === 'current' ? 'primary' : 'ghost'} onClick={() => setLineup('current')}>
+                Keep current rotation
+              </button>
+            </span>
+          </div>
+        </>
+      )}
+      <div className="set-end-choices">
+        <button type="button" className="primary" onClick={() => onNext(serving, lineup)}>
+          {deciding ? 'Store final set' : `Start set ${setEnd.set + 1}`}
+        </button>
+        <button type="button" className="ghost" onClick={onUndo}>
+          Undo last point
+        </button>
+      </div>
     </div>
   )
 }

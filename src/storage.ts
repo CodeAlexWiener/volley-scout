@@ -1,4 +1,5 @@
 import { defaultSession, emptyMatchFields } from './defaultRoster'
+import { migrateLegacyEvent } from './migrate'
 import { emptyMatchState, positionsFromRoster } from './rotation'
 import type {
   CourtPosition,
@@ -10,6 +11,7 @@ import type {
   Rally,
   RosterPlayer,
   ScoutEvent,
+  SetScore,
   Span,
 } from './types'
 import { LEGACY_ROLE_MAP } from './types'
@@ -136,7 +138,12 @@ function normalizeSession(parsed: Record<string, unknown>): MatchSession {
     roster,
     bindings: Array.isArray(parsed.bindings) ? (parsed.bindings as MatchSession['bindings']) : [],
     currentPlayerId: typeof parsed.currentPlayerId === 'string' ? parsed.currentPlayerId : null,
-    events: Array.isArray(parsed.events) ? (parsed.events as ScoutEvent[]) : [],
+    events: Array.isArray(parsed.events) ? (parsed.events as ScoutEvent[]).map(migrateLegacyEvent) : [],
+    sets: Array.isArray(parsed.sets)
+      ? parsed.sets
+          .filter((x): x is SetScore => Boolean(x) && typeof (x as SetScore).us === 'number' && typeof (x as SetScore).them === 'number')
+          .map((x) => ({ us: x.us, them: x.them }))
+      : [],
     match: normalizeMatch(parsed.match as Partial<MatchState> | undefined, roster),
     updatedAt: new Date().toISOString(),
   }

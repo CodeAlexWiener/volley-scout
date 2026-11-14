@@ -62,7 +62,19 @@ export type ScoutEvent = {
   t: number
   source: EventSource
   status: EventStatus
+  /** Step-2 detail id, when the outcome has details (e.g. attack/kill → tip_dump). */
+  detail?: string
+  /** Set number (1-based) the event was logged in. */
+  set?: number
 }
+
+/** Team-level action ids that are not on a player. */
+export const TEAM_ACTION = 'team'
+/** Substitution marker: playerId comes on, outcome is the id of the player going off. */
+export const SUBSTITUTION_ACTION = 'substitution'
+
+/** Final score of a finished set. */
+export type SetScore = { us: number; them: number }
 
 /** Live rotation / serve possession (own side only). */
 export type MatchState = {
@@ -114,6 +126,8 @@ export type MatchSession = {
   cut: CutState | null
   /** Jump over dead time between rallies while playing. */
   skipDeadTime: boolean
+  /** Finished sets, in order. The current set number is sets.length + 1. */
+  sets: SetScore[]
   roster: RosterPlayer[]
   /** Optional soft→player binding for later CV tracks; UI uses currentPlayerId. */
   bindings: TrackBinding[]
@@ -134,6 +148,8 @@ export type GridOutcome = {
   id: string
   label: string
   note?: string
+  /** Optional step-2 detail (e.g. kill → spike / tip / block-out). */
+  details?: { id: string; label: string }[]
 }
 
 export type GridAction = {

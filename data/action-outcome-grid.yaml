@@ -1,127 +1,84 @@
-# Action → outcome grid for volley-scout (v2.5)
-# Flow-aware own-side scouting. See docs/scouting-flow.md
-# Setter quality is DERIVED from pass (reception/dig) + attack outcomes — not graded on second_touch in/out.
-# Direct second-touch faults: error_own | error_tried_save.
-# Opponent ends rally with no our touch: opponent_error (out | net | other) — synthetic Opponent row in UI.
+# Action → outcome grid for volley-scout (v3, two-step grid)
+# Flow-aware own-side scouting. See docs/action-outcome-grid.md and docs/scouting-flow.md
+# Step 1 picks the outcome (for dig and block: the action); step 2 picks a detail
+# (or, for dig and block, the outcome). The first detail is the Enter default.
+# App copy: src/data/grid.ts. Situations and rows: src/flow.ts. Scoring: src/rotation.ts.
 
-version: "2.5"
+version: "3.0"
 schema: action_outcome_grid
 
 actions:
   - id: serve
     label: Serve
     outcomes:
+      - id: in_play
+        label: In play
+        details: [in_system, out_of_system, overpass] # their pass
       - id: ace
         label: Ace
-      - id: in_play_in_system
-        label: In play — in system
-        note: Serve in; receiving team stays in system (easier). Next own touch dig/block
-      - id: in_play_out_of_system
-        label: In play — out of system
-        note: Serve in; receiving team out of system (pressure). Next own touch dig/block
-      - id: serve_error
-        label: Serve error
+        details: [no_touch, touched]
+      - id: error
+        label: Error
 
   - id: reception
     label: Reception
-    note: Only after opponent serve
-    outcomes:
-      - id: in_system
-        label: In system
-      - id: out_of_system
-        label: Out of system
-      - id: overpass
-        label: Overpass
-      - id: error
-        label: Error
-
-  - id: dig
-    label: Dig
-    note: Defense after attack/freeball (not serve receive)
-    outcomes:
-      - id: in_system
-        label: In system
-      - id: out_of_system
-        label: Out of system
-      - id: overpass
-        label: Overpass
-      - id: error
-        label: Error
+    note: Only after an opponent serve
+    outcomes: [in_system, out_of_system, overpass, error]
 
   - id: second_touch
     label: Second touch
-    note: Second team contact after reception/dig. In/out of system comes from prior pass; quality from following attack. Direct faults use error_own / error_tried_save.
     outcomes:
       - id: set
-        label: Set
-        note: Intentional set to a hitter
       - id: save
-        label: Save
-        note: Emergency second touch to keep the ball playable
-      - id: error_own
-        label: Error (own fault)
-        note: Second-touch fault ending the point (net, lift, out, etc.) — not a failed save attempt
-      - id: error_tried_save
-        label: Error (tried save)
-        note: Tried an emergency save and the ball died / point ended
+      - id: attack_on_2
+        note: Next entry is an attack by the same player
+      - id: error
+        details: [lift_double, net, failed_save]
 
   - id: attack
     label: Attack
+    note: Dump / tip is an attack (attack_on_2 + kill/tip_dump)
     outcomes:
       - id: kill
-        label: Kill
+        details: [spike, tip_dump, block_out]
       - id: defended
-        label: Defended
       - id: blocked
-        label: Blocked
-      - id: error_own
-        label: Error (own fault)
-      - id: error_bad_set
-        label: Error (bad set)
+        details: [stuffed, covered] # stuffed = point them, covered = play on
+      - id: error
+        details: [out, net, bad_set, violation]
 
-  - id: dump
-    label: Dump
-    note: Setter tip / dump
-    outcomes:
-      - id: point
-        label: Point
-      - id: defended
-        label: Defended
-      - id: blocked
-        label: Blocked
-      - id: error_own
-        label: Error (own fault)
-      - id: error_bad_set
-        label: Error (bad set)
+  - id: dig
+    label: Dig
+    note: First touch after their attack, freeball or overpass
+    outcomes: [in_system, out_of_system, overpass, error]
 
   - id: block
     label: Block
     outcomes:
-      - id: kill_block
-        label: Kill block
-      - id: recycle
-        label: Recycle
-      - id: block_error
-        label: Block error
+      - kill_block # point us
+      - soft_block # stays on our side, play on
+      - touch # play on
+      - tooled # off our block and out, point them
+      - block_error # net / over the line, point them
 
   - id: freeball_send
-    label: Freeball (send)
-    note: Receiving a freeball = dig
-    outcomes:
-      - id: in_play
-        label: In play
-      - id: error
-        label: Error
+    label: Freeball
+    note: Available in second touch, attack and defense situations
+    outcomes: [in_play, error]
 
   - id: opponent_error
-    label: Opponent error
-    note: Opponent ends the rally with no logged our touch (e.g. they hit out). UI uses synthetic Opponent "person"; event has no roster playerId.
+    label: Opponent
+    note: Opponent row. serve_error only when they serve, out only when the ball comes over.
+    outcomes: [serve_error, out, error]
+
+  - id: team
+    label: Team
+    note: Team row in every situation. Replay is always the last option.
     outcomes:
-      - id: out
-        label: Out
-        note: Ball out / into the outside
-      - id: net
-        label: Net
-      - id: other
-        label: Other
-        note: Other unforced opponent fault (catch, double, referee)
+      - down # their kill, nobody touched it: point them
+      - fault # rotation, net, four hits, center line: point them
+      - replay # no point, same server
+
+# Outside the grid
+#   rally_point (us | them): keys P / O, when the deciding touch is not tracked
+#   substitution: playerId comes on, outcome = player id going off

@@ -1,4 +1,4 @@
-import { BACK_ROW, FRONT_ROW, RALLY_POINT_ACTION } from './types'
+import { BACK_ROW, FRONT_ROW, RALLY_POINT_ACTION, TEAM_ACTION } from './types'
 import type {
   CourtPosition,
   MatchState,
@@ -155,90 +155,55 @@ export type ServePossessionChange =
   | { kind: 'they_gain_serve' }
   | { kind: 'they_keep_serve' }
   | { kind: 'rally_continues' }
+  /** Rally decided without a point (referee replay): same server, no score change. */
+  | { kind: 'replay' }
+
+/** Who won the point, if this event decides the rally. */
+export function pointWinner(action: string, outcome: string, detail?: string): 'us' | 'them' | 'replay' | null {
+  switch (action) {
+    case 'serve':
+      return outcome === 'ace' ? 'us' : outcome === 'error' ? 'them' : null
+    case 'reception':
+    case 'dig':
+    case 'freeball_send':
+    case 'second_touch':
+      return outcome === 'error' ? 'them' : null
+    case 'attack':
+      if (outcome === 'kill') return 'us'
+      if (outcome === 'error') return 'them'
+      if (outcome === 'blocked') return detail === 'stuffed' ? 'them' : null
+      return null
+    case 'block':
+      if (outcome === 'kill_block') return 'us'
+      if (outcome === 'tooled' || outcome === 'block_error') return 'them'
+      return null
+    case 'opponent_error':
+      return 'us'
+    case TEAM_ACTION:
+      if (outcome === 'replay') return 'replay'
+      return outcome === 'down' || outcome === 'fault' ? 'them' : null
+    case RALLY_POINT_ACTION:
+      return outcome === 'us' ? 'us' : outcome === 'them' ? 'them' : null
+    default:
+      return null
+  }
+}
 
 /**
- * Infer how serve possession / score should change from an own-side event.
+ * How serve possession and score change after one of our logged events.
  * Never models opponent touches — only our logged outcomes.
  */
 export function possessionAfterEvent(
   action: string,
   outcome: string,
   servingTeam: ServingTeam,
+  detail?: string,
 ): ServePossessionChange {
-  if (action === 'serve') {
-    if (outcome === 'ace') return { kind: 'we_keep_serve' }
-    if (outcome === 'serve_error') return { kind: 'they_gain_serve' }
-    return { kind: 'rally_continues' }
-  }
-
-  if (action === 'reception' || action === 'dig') {
-    if (outcome === 'error') {
-      return servingTeam === 'us' ? { kind: 'they_gain_serve' } : { kind: 'they_keep_serve' }
-    }
-    return { kind: 'rally_continues' }
-  }
-
-  // second_touch: set | save keep rally alive; error_own | error_tried_save end the point
-  if (action === 'second_touch' || action === 'set') {
-    if (outcome === 'error_own' || outcome === 'error_tried_save') {
-      return servingTeam === 'us' ? { kind: 'they_gain_serve' } : { kind: 'they_keep_serve' }
-    }
-    return { kind: 'rally_continues' }
-  }
-
-  if (action === 'attack' || action === 'dump') {
-    const weScore =
-      (action === 'attack' && outcome === 'kill') ||
-      (action === 'dump' && outcome === 'point')
-    if (weScore) {
-      return servingTeam === 'us' ? { kind: 'we_keep_serve' } : { kind: 'we_gain_serve' }
-    }
-    if (
-      outcome === 'error_own' ||
-      outcome === 'error_bad_set' ||
-      outcome === 'blocked'
-    ) {
-      // blocked → cover dig (rally continues). Only errors end the point.
-      if (outcome === 'blocked') return { kind: 'rally_continues' }
-      return servingTeam === 'us' ? { kind: 'they_gain_serve' } : { kind: 'they_keep_serve' }
-    }
-    return { kind: 'rally_continues' }
-  }
-
-  if (action === 'block') {
-    if (outcome === 'kill_block') {
-      return servingTeam === 'us' ? { kind: 'we_keep_serve' } : { kind: 'we_gain_serve' }
-    }
-    if (outcome === 'block_error') {
-      return servingTeam === 'us' ? { kind: 'they_gain_serve' } : { kind: 'they_keep_serve' }
-    }
-    return { kind: 'rally_continues' }
-  }
-
-  if (action === 'freeball_send') {
-    if (outcome === 'error') {
-      return servingTeam === 'us' ? { kind: 'they_gain_serve' } : { kind: 'they_keep_serve' }
-    }
-    return { kind: 'rally_continues' }
-  }
-
-  // "Point us / point them" marker when the deciding touch is not tracked
-  if (action === RALLY_POINT_ACTION) {
-    if (outcome === 'us') {
-      return servingTeam === 'us' ? { kind: 'we_keep_serve' } : { kind: 'we_gain_serve' }
-    }
-    if (outcome === 'them') {
-      return servingTeam === 'us' ? { kind: 'they_gain_serve' } : { kind: 'they_keep_serve' }
-    }
-    return { kind: 'rally_continues' }
-  }
-
-  // Opponent ends rally with no our touch — we score
-  if (action === 'opponent_error') {
-    return servingTeam === 'us' ? { kind: 'we_keep_serve' } : { kind: 'we_gain_serve' }
-  }
-
-  return { kind: 'rally_continues' }
+  const winner = pointWinner(action, outcome, detail)
+  if (winner === null) return { kind: 'rally_continues' }
+  if (winner === 'replay') return { kind: 'replay' }
+  if (winner === 'us') return servingTeam === 'us' ? { kind: 'we_keep_serve' } : { kind: 'we_gain_serve' }
+  return servingTeam === 'us' ? { kind: 'they_gain_serve' } : { kind: 'they_keep_serve' }
 }
 
 /** Apply possession change: rotate on side-out, bump optional score. */
@@ -273,6 +238,19 @@ export function applyPossessionChange(
         scoreThem: match.scoreThem + 1,
       }
     case 'rally_continues':
+    case 'replay':
       return match
   }
+}
+
+/** Points needed to win a set: 25, and 15 in the deciding third set. */
+export function setTarget(setNumber: number): number {
+  return setNumber >= 3 ? 15 : 25
+}
+
+/** A set is over at the target score with a two-point lead. */
+export function isSetOver(match: Pick<MatchState, 'scoreUs' | 'scoreThem'>, setNumber: number): boolean {
+  const target = setTarget(setNumber)
+  const high = Math.max(match.scoreUs, match.scoreThem)
+  return high >= target && Math.abs(match.scoreUs - match.scoreThem) >= 2
 }

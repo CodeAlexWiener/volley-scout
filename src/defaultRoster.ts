@@ -17,9 +17,10 @@ export const DEFAULT_ROSTER: RosterPlayer[] = [
 /** Match-specific fields that start empty for every new video. */
 export function emptyMatchFields(): Pick<
   MatchSession,
-  'videoName' | 'videoKey' | 'matchWindow' | 'rallies' | 'dismissedAi' | 'cut' | 'skipDeadTime'
+  'videoName' | 'videoKey' | 'matchWindow' | 'rallies' | 'dismissedAi' | 'cut' | 'skipDeadTime' | 'sets'
 > {
   return {
+    sets: [],
     videoName: null,
     videoKey: null,
     matchWindow: { start: null, end: null },

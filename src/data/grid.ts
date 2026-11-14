@@ -1,46 +1,42 @@
 import type { ActionOutcomeGrid } from '../types'
 
 /**
- * In-app copy of data/action-outcome-grid.yaml (v2.5).
- * Keep in sync when editing the YAML source of truth.
+ * In-app copy of data/action-outcome-grid.yaml (v3, two-step grid).
+ * Step 1 picks an outcome (or, for dig/block, the action itself); step 2 picks a detail
+ * or the outcome. Keep in sync when editing the YAML source of truth.
  */
 export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
-  version: '2.5',
+  version: '3.0',
   schema: 'action_outcome_grid',
   actions: [
     {
       id: 'serve',
       label: 'Serve',
       outcomes: [
-        { id: 'ace', label: 'Ace' },
         {
-          id: 'in_play_in_system',
-          label: 'In play — in system',
-          note: 'Serve in; receiving team stays in system (easier). Next own touch dig/block',
+          id: 'in_play',
+          label: 'In play',
+          details: [
+            { id: 'in_system', label: 'Their pass in system' },
+            { id: 'out_of_system', label: 'Their pass out of system' },
+            { id: 'overpass', label: 'Their pass overpass' },
+          ],
         },
         {
-          id: 'in_play_out_of_system',
-          label: 'In play — out of system',
-          note: 'Serve in; receiving team out of system (pressure). Next own touch dig/block',
+          id: 'ace',
+          label: 'Ace',
+          details: [
+            { id: 'no_touch', label: 'No touch' },
+            { id: 'touched', label: 'Touched' },
+          ],
         },
-        { id: 'serve_error', label: 'Serve error' },
+        { id: 'error', label: 'Error' },
       ],
     },
     {
       id: 'reception',
       label: 'Reception',
-      note: 'Only after opponent serve',
-      outcomes: [
-        { id: 'in_system', label: 'In system' },
-        { id: 'out_of_system', label: 'Out of system' },
-        { id: 'overpass', label: 'Overpass' },
-        { id: 'error', label: 'Error' },
-      ],
-    },
-    {
-      id: 'dig',
-      label: 'Dig',
-      note: 'Defense after attack/freeball (not serve receive)',
+      note: 'Only after an opponent serve',
       outcomes: [
         { id: 'in_system', label: 'In system' },
         { id: 'out_of_system', label: 'Out of system' },
@@ -51,19 +47,18 @@ export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
     {
       id: 'second_touch',
       label: 'Second touch',
-      note: 'Second team contact after reception/dig. In/out of system comes from prior pass; quality from following attack. Direct faults use error_own / error_tried_save.',
       outcomes: [
-        { id: 'set', label: 'Set', note: 'Intentional set to a hitter' },
-        { id: 'save', label: 'Save', note: 'Emergency second touch to keep the ball playable' },
+        { id: 'set', label: 'Set' },
+        { id: 'save', label: 'Save' },
+        { id: 'attack_on_2', label: 'Attack on 2', note: 'Next entry is an attack by the same player' },
         {
-          id: 'error_own',
-          label: 'Error (own fault)',
-          note: 'Second-touch fault ending the point (net, lift, out, etc.) — not a failed save attempt',
-        },
-        {
-          id: 'error_tried_save',
-          label: 'Error (tried save)',
-          note: 'Tried an emergency save and the ball died / point ended',
+          id: 'error',
+          label: 'Error',
+          details: [
+            { id: 'lift_double', label: 'Lift / double' },
+            { id: 'net', label: 'Net' },
+            { id: 'failed_save', label: 'Failed save' },
+          ],
         },
       ],
     },
@@ -71,23 +66,45 @@ export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
       id: 'attack',
       label: 'Attack',
       outcomes: [
-        { id: 'kill', label: 'Kill' },
+        {
+          id: 'kill',
+          label: 'Kill',
+          details: [
+            { id: 'spike', label: 'Spike' },
+            { id: 'tip_dump', label: 'Tip / dump' },
+            { id: 'block_out', label: 'Block-out' },
+          ],
+        },
         { id: 'defended', label: 'Defended' },
-        { id: 'blocked', label: 'Blocked' },
-        { id: 'error_own', label: 'Error (own fault)' },
-        { id: 'error_bad_set', label: 'Error (bad set)' },
+        {
+          id: 'blocked',
+          label: 'Blocked',
+          details: [
+            { id: 'stuffed', label: 'Stuffed (point them)' },
+            { id: 'covered', label: 'Covered (back to us)' },
+          ],
+        },
+        {
+          id: 'error',
+          label: 'Error',
+          details: [
+            { id: 'out', label: 'Out' },
+            { id: 'net', label: 'Net' },
+            { id: 'bad_set', label: 'Bad set' },
+            { id: 'violation', label: 'Violation' },
+          ],
+        },
       ],
     },
     {
-      id: 'dump',
-      label: 'Dump',
-      note: 'Setter tip / dump',
+      id: 'dig',
+      label: 'Dig',
+      note: 'Defense after their attack, freeball or overpass',
       outcomes: [
-        { id: 'point', label: 'Point' },
-        { id: 'defended', label: 'Defended' },
-        { id: 'blocked', label: 'Blocked' },
-        { id: 'error_own', label: 'Error (own fault)' },
-        { id: 'error_bad_set', label: 'Error (bad set)' },
+        { id: 'in_system', label: 'In system' },
+        { id: 'out_of_system', label: 'Out of system' },
+        { id: 'overpass', label: 'Overpass' },
+        { id: 'error', label: 'Error' },
       ],
     },
     {
@@ -95,14 +112,15 @@ export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
       label: 'Block',
       outcomes: [
         { id: 'kill_block', label: 'Kill block' },
-        { id: 'recycle', label: 'Recycle' },
+        { id: 'soft_block', label: 'Soft block (our side)' },
+        { id: 'touch', label: 'Touch (play on)' },
+        { id: 'tooled', label: 'Tooled (point them)' },
         { id: 'block_error', label: 'Block error' },
       ],
     },
     {
       id: 'freeball_send',
-      label: 'Freeball (send)',
-      note: 'Receiving a freeball = dig',
+      label: 'Freeball',
       outcomes: [
         { id: 'in_play', label: 'In play' },
         { id: 'error', label: 'Error' },
@@ -110,12 +128,22 @@ export const ACTION_OUTCOME_GRID: ActionOutcomeGrid = {
     },
     {
       id: 'opponent_error',
-      label: 'Opponent error',
-      note: 'Opponent ends the rally with no logged our touch (e.g. they hit out). UI uses synthetic Opponent "person"; event has no roster playerId.',
+      label: 'Opponent',
+      note: 'Opponent ends the rally with no deciding touch of ours',
       outcomes: [
-        { id: 'out', label: 'Out', note: 'Ball out / into the outside' },
-        { id: 'net', label: 'Net' },
-        { id: 'other', label: 'Other', note: 'Other unforced opponent fault (catch, double, referee)' },
+        { id: 'serve_error', label: 'Serve error' },
+        { id: 'out', label: 'Out' },
+        { id: 'error', label: 'Error' },
+      ],
+    },
+    {
+      id: 'team',
+      label: 'Team',
+      note: 'Rally endings that belong to no single player',
+      outcomes: [
+        { id: 'down', label: 'Down', note: 'Their kill, nobody touched it' },
+        { id: 'fault', label: 'Fault', note: 'Rotation, net, four hits, center line…' },
+        { id: 'replay', label: 'Replay', note: 'No point, same server' },
       ],
     },
   ],
@@ -128,4 +156,10 @@ export function labelForAction(actionId: string): string {
 export function labelForOutcome(actionId: string, outcomeId: string): string {
   const action = ACTION_OUTCOME_GRID.actions.find((a) => a.id === actionId)
   return action?.outcomes.find((o) => o.id === outcomeId)?.label ?? outcomeId
+}
+
+export function labelForDetail(actionId: string, outcomeId: string, detailId: string): string {
+  const action = ACTION_OUTCOME_GRID.actions.find((a) => a.id === actionId)
+  const outcome = action?.outcomes.find((o) => o.id === outcomeId)
+  return outcome?.details?.find((d) => d.id === detailId)?.label ?? detailId
 }
