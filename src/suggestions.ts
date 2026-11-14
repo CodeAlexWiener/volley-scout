@@ -12,6 +12,7 @@ import type {
   ScoutEvent,
   SuggestionOption,
 } from './types'
+import { RALLY_POINT_ACTION } from './types'
 
 function opt(
   playerId: string | null,
@@ -233,6 +234,12 @@ export function suggestNext(
 
   if (action === 'opponent_error') {
     return suggestServe(roster, match, 'Opponent error — we serve (P1 after rotate if side-out)')
+  }
+
+  if (action === RALLY_POINT_ACTION) {
+    return match.servingTeam === 'us'
+      ? suggestServe(roster, match, 'Point us — we serve')
+      : suggestReception(roster, match, 'Point them — they serve, reception')
   }
 
   return null

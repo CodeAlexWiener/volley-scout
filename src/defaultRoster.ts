@@ -14,11 +14,27 @@ export const DEFAULT_ROSTER: RosterPlayer[] = [
   { id: 'pl_kathi', name: 'Kathi', role: 'outside', startingPosition: 6 },
 ]
 
+/** Match-specific fields that start empty for every new video. */
+export function emptyMatchFields(): Pick<
+  MatchSession,
+  'videoName' | 'videoKey' | 'matchWindow' | 'rallies' | 'dismissedAi' | 'cut' | 'skipDeadTime'
+> {
+  return {
+    videoName: null,
+    videoKey: null,
+    matchWindow: { start: null, end: null },
+    rallies: [],
+    dismissedAi: [],
+    cut: null,
+    skipDeadTime: true,
+  }
+}
+
 export function defaultSession(): MatchSession {
   const roster = DEFAULT_ROSTER.map((p) => ({ ...p }))
   return {
     version: 2,
-    videoName: null,
+    ...emptyMatchFields(),
     roster,
     bindings: [],
     currentPlayerId: roster[0]?.id ?? null,

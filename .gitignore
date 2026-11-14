@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Secrets and local match data
+.env
+.env.*
+!.env.example
+.cache/
+matches/
