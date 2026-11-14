@@ -36,6 +36,13 @@ export function isOpponentPlayerId(id: string | null | undefined): boolean {
   return id === OPPONENT_PLAYER_ID
 }
 
+/**
+ * Sentinel for "point us / point them" markers, used when the deciding touch
+ * is not something you track. Action is {@link RALLY_POINT_ACTION}.
+ */
+export const TEAM_PLAYER_ID = '__team__'
+export const RALLY_POINT_ACTION = 'rally_point'
+
 /** Synthetic grid / log person for opponent_error (not on the roster). */
 export const OPPONENT_PLAYER: RosterPlayer = {
   id: OPPONENT_PLAYER_ID,
@@ -67,9 +74,46 @@ export type MatchState = {
   scoreThem: number
 }
 
+/** A span of the video file, in seconds. */
+export type Span = { start: number; end: number }
+
+/** One rally on the timeline. AI rallies become 'human' once you adjust them. */
+export type Rally = Span & {
+  id: string
+  source: 'ai' | 'human'
+}
+
+/** Where the played match starts and ends inside the file. Null until marked. */
+export type MatchWindow = {
+  start: number | null
+  end: number | null
+}
+
+/** Last known state of the rally cut job on the local server. */
+export type CutState = {
+  jobId: string
+  status: 'running' | 'done' | 'failed' | 'cancelled'
+  model: string
+  chunksTotal: number
+  chunksDone: number
+  /** Parts of the match window the model has looked at; only these gaps are skipped. */
+  covered: Span[]
+  warnings: string[]
+  error?: string
+}
+
 export type MatchSession = {
   version: 2
   videoName: string | null
+  /** Local server id of this match: file name + size. Also the matches/<key>.json name. */
+  videoKey: string | null
+  matchWindow: MatchWindow
+  rallies: Rally[]
+  /** AI rallies you deleted; a still-running cut will not bring them back. */
+  dismissedAi: Span[]
+  cut: CutState | null
+  /** Jump over dead time between rallies while playing. */
+  skipDeadTime: boolean
   roster: RosterPlayer[]
   /** Optional soft→player binding for later CV tracks; UI uses currentPlayerId. */
   bindings: TrackBinding[]

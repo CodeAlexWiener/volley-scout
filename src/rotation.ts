@@ -1,4 +1,4 @@
-import { BACK_ROW, FRONT_ROW } from './types'
+import { BACK_ROW, FRONT_ROW, RALLY_POINT_ACTION } from './types'
 import type {
   CourtPosition,
   MatchState,
@@ -217,6 +217,17 @@ export function possessionAfterEvent(
 
   if (action === 'freeball_send') {
     if (outcome === 'error') {
+      return servingTeam === 'us' ? { kind: 'they_gain_serve' } : { kind: 'they_keep_serve' }
+    }
+    return { kind: 'rally_continues' }
+  }
+
+  // "Point us / point them" marker when the deciding touch is not tracked
+  if (action === RALLY_POINT_ACTION) {
+    if (outcome === 'us') {
+      return servingTeam === 'us' ? { kind: 'we_keep_serve' } : { kind: 'we_gain_serve' }
+    }
+    if (outcome === 'them') {
       return servingTeam === 'us' ? { kind: 'they_gain_serve' } : { kind: 'they_keep_serve' }
     }
     return { kind: 'rally_continues' }

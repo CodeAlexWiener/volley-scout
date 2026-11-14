@@ -1,12 +1,16 @@
-import { defaultSession } from './defaultRoster'
+import { defaultSession, emptyMatchFields } from './defaultRoster'
 import { emptyMatchState, positionsFromRoster } from './rotation'
 import type {
   CourtPosition,
+  CutState,
   MatchSession,
   MatchState,
+  MatchWindow,
   PlayerRole,
+  Rally,
   RosterPlayer,
   ScoutEvent,
+  Span,
 } from './types'
 import { LEGACY_ROLE_MAP } from './types'
 
@@ -61,6 +65,52 @@ function normalizeMatch(raw: Partial<MatchState> | undefined, roster: RosterPlay
   }
 }
 
+function finite(n: unknown): number | null {
+  return typeof n === 'number' && Number.isFinite(n) ? n : null
+}
+
+function normalizeSpan(raw: unknown): Span | null {
+  if (!raw || typeof raw !== 'object') return null
+  const start = finite((raw as Span).start)
+  const end = finite((raw as Span).end)
+  return start !== null && end !== null && end > start ? { start, end } : null
+}
+
+function normalizeRally(raw: unknown): Rally | null {
+  const span = normalizeSpan(raw)
+  if (!span) return null
+  const r = raw as Partial<Rally>
+  return {
+    ...span,
+    id: typeof r.id === 'string' ? r.id : newId('ra'),
+    source: r.source === 'human' ? 'human' : 'ai',
+  }
+}
+
+function normalizeWindow(raw: unknown): MatchWindow {
+  if (!raw || typeof raw !== 'object') return { start: null, end: null }
+  return { start: finite((raw as MatchWindow).start), end: finite((raw as MatchWindow).end) }
+}
+
+function normalizeCut(raw: unknown): CutState | null {
+  if (!raw || typeof raw !== 'object') return null
+  const c = raw as Partial<CutState>
+  if (typeof c.jobId !== 'string') return null
+  const status = c.status === 'done' || c.status === 'failed' || c.status === 'cancelled' ? c.status : 'running'
+  return {
+    jobId: c.jobId,
+    status,
+    model: typeof c.model === 'string' ? c.model : '',
+    chunksTotal: finite(c.chunksTotal) ?? 0,
+    chunksDone: finite(c.chunksDone) ?? 0,
+    covered: Array.isArray(c.covered)
+      ? c.covered.map(normalizeSpan).filter((s): s is Span => s !== null)
+      : [],
+    warnings: Array.isArray(c.warnings) ? c.warnings.filter((w): w is string => typeof w === 'string') : [],
+    error: typeof c.error === 'string' ? c.error : undefined,
+  }
+}
+
 function normalizeSession(parsed: Record<string, unknown>): MatchSession {
   const rosterRaw = Array.isArray(parsed.roster) ? parsed.roster : []
   const roster = rosterRaw
@@ -69,9 +119,20 @@ function normalizeSession(parsed: Record<string, unknown>): MatchSession {
     )
     .map(normalizePlayer)
 
+  const empty = emptyMatchFields()
   return {
     version: 2,
     videoName: typeof parsed.videoName === 'string' ? parsed.videoName : null,
+    videoKey: typeof parsed.videoKey === 'string' ? parsed.videoKey : null,
+    matchWindow: normalizeWindow(parsed.matchWindow),
+    rallies: Array.isArray(parsed.rallies)
+      ? parsed.rallies.map(normalizeRally).filter((r): r is Rally => r !== null)
+      : [],
+    dismissedAi: Array.isArray(parsed.dismissedAi)
+      ? parsed.dismissedAi.map(normalizeSpan).filter((r): r is Span => r !== null)
+      : [],
+    cut: normalizeCut(parsed.cut),
+    skipDeadTime: typeof parsed.skipDeadTime === 'boolean' ? parsed.skipDeadTime : empty.skipDeadTime,
     roster,
     bindings: Array.isArray(parsed.bindings) ? (parsed.bindings as MatchSession['bindings']) : [],
     currentPlayerId: typeof parsed.currentPlayerId === 'string' ? parsed.currentPlayerId : null,

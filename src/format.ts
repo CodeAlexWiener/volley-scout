@@ -1,4 +1,4 @@
-import { isOpponentPlayerId, OPPONENT_PLAYER } from './types'
+import { isOpponentPlayerId, OPPONENT_PLAYER, RALLY_POINT_ACTION, TEAM_PLAYER_ID } from './types'
 
 /** Format seconds as m:ss.t (one decimal). */
 export function formatTime(seconds: number): string {
@@ -25,5 +25,12 @@ export function resolveEventPlayer(
   roster: { id: string; name: string }[],
 ): { id: string; name: string } | undefined {
   if (isOpponentPlayerId(playerId)) return OPPONENT_PLAYER
+  if (playerId === TEAM_PLAYER_ID) return { id: TEAM_PLAYER_ID, name: 'Rally' }
   return roster.find((p) => p.id === playerId)
+}
+
+/** Labels for events the scout grid does not own (point us / point them). */
+export function eventWhat(action: string, outcome: string, grid: (a: string, o: string) => string): string {
+  if (action === RALLY_POINT_ACTION) return outcome === 'us' ? 'Point us' : 'Point them'
+  return grid(action, outcome)
 }

@@ -7,7 +7,33 @@ import {
 } from './candidates'
 import type { FocusCell, GridColumn } from './candidates'
 import { ACTION_OUTCOME_GRID, labelForAction, labelForOutcome } from './data/grid'
-import { formatTime, playerLabel, resolveEventPlayer } from './format'
+import {
+  cancelCut,
+  getCut,
+  getHealth,
+  loadMatch,
+  saveMatch,
+  startCut,
+  uploadVideo,
+  videoKeyFor,
+  videoOnServer,
+  type CutJobView,
+  type Health,
+} from './api'
+import { eventWhat, formatTime, playerLabel, resolveEventPlayer } from './format'
+import { MatchSetup, type CopyState } from './MatchSetup'
+import {
+  mergeAiRallies,
+  nextRallyAfter,
+  rallyAt,
+  rallyDecided,
+  removeRally,
+  setRallyEnd,
+  setRallyStart,
+  spanCovered,
+  splitRally,
+} from './rallies'
+import { RallyTimeline } from './RallyTimeline'
 import {
   applyPossessionChange,
   playerAt,
@@ -16,7 +42,7 @@ import {
   possessionAfterEvent,
   rotateClockwise,
 } from './rotation'
-import { defaultSession } from './defaultRoster'
+import { defaultSession, emptyMatchFields } from './defaultRoster'
 import { ScoutGrid } from './ScoutGrid'
 import {
   exportSessionJson,
@@ -28,11 +54,14 @@ import {
 import { suggestNext } from './suggestions'
 import type {
   CourtPosition,
+  CutState,
   FlowSuggestion,
   MatchSession,
   PlayerRole,
+  Rally,
   RosterPlayer,
   ScoutEvent,
+  Span,
   SuggestionOption,
 } from './types'
 import {
@@ -40,6 +69,8 @@ import {
   isOpponentPlayerId,
   OPPONENT_PLAYER_ID,
   PLAYER_ROLES,
+  RALLY_POINT_ACTION,
+  TEAM_PLAYER_ID,
 } from './types'
 import './App.css'
 
@@ -92,6 +123,214 @@ export default function App() {
   const undoStackRef = useRef<UndoSnapshot[]>([])
   const sessionRef = useRef(session)
   sessionRef.current = session
+  const [health, setHealth] = useState<Health | null>(null)
+  const [copy, setCopy] = useState<CopyState>({ status: 'none' })
+  /** Setup panel (mark match + cut). Opens by itself until a cut has been started. */
+  const [setupOpen, setSetupOpen] = useState(() => session.cut == null)
+  /** A rally that ended without a point winner; playback paused on it. */
+  const [unfinished, setUnfinished] = useState<Rally | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  /** Dead time you clicked into on purpose; skipping leaves it alone. */
+  const gapHoldRef = useRef<Span | null>(null)
+  const lastRallyIdRef = useRef<string | null>(null)
+  const unfinishedShownRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    void getHealth().then(setHealth)
+  }, [])
+
+  // Every change is written to matches/<videoKey>.json (browser storage stays as a crash backup).
+  useEffect(() => {
+    const key = session.videoKey
+    if (!key) return
+    const timer = setTimeout(() => {
+      saveMatch(key, session).then(
+        () => setSaveError(null),
+        (error: unknown) => setSaveError(error instanceof Error ? error.message : 'Save failed'),
+      )
+    }, 700)
+    return () => clearTimeout(timer)
+  }, [session])
+
+  const applyJob = useCallback((job: CutJobView) => {
+    setSession((s) => {
+      if (s.cut?.jobId !== job.id) return s
+      const cut: CutState = {
+        jobId: job.id,
+        status: job.status,
+        model: job.model,
+        chunksTotal: job.chunksTotal,
+        chunksDone: job.chunksDone,
+        covered: job.covered,
+        warnings: job.warnings,
+        error: job.error,
+      }
+      return { ...s, cut, rallies: mergeAiRallies(s.rallies, job.rallies, s.dismissedAi) }
+    })
+  }, [])
+
+  // Poll the cut job while it runs; rallies stream onto the timeline.
+  const cutJobId = session.cut?.status === 'running' ? session.cut.jobId : null
+  useEffect(() => {
+    if (!cutJobId) return
+    let stopped = false
+    const poll = async () => {
+      try {
+        const job = await getCut(cutJobId)
+        if (!stopped) applyJob(job)
+        if (!stopped && job.status === 'running') timer = setTimeout(poll, 2000)
+      } catch (error) {
+        if (stopped) return
+        setSession((s) =>
+          s.cut?.jobId === cutJobId
+            ? {
+                ...s,
+                cut: {
+                  ...s.cut,
+                  status: 'failed',
+                  error: `${error instanceof Error ? error.message : 'Lost the cut job'}. Rallies found so far are kept; cut again to finish.`,
+                },
+              }
+            : s,
+        )
+      }
+    }
+    let timer = setTimeout(poll, 500)
+    return () => {
+      stopped = true
+      clearTimeout(timer)
+    }
+  }, [cutJobId, applyJob])
+
+  async function onCutRallies() {
+    const s = sessionRef.current
+    const { start, end } = s.matchWindow
+    if (!s.videoKey || start == null || end == null) return
+    try {
+      if (s.cut?.status === 'running') await cancelCut(s.cut.jobId)
+      const job = await startCut(s.videoKey, { start, end })
+      setSession((prev) => ({
+        ...prev,
+        // A fresh cut replaces the AI's rallies; yours stay.
+        rallies: prev.rallies.filter((r) => r.source === 'human'),
+        cut: {
+          jobId: job.id,
+          status: job.status,
+          model: job.model,
+          chunksTotal: job.chunksTotal,
+          chunksDone: 0,
+          covered: [],
+          warnings: [],
+        },
+      }))
+      setSetupOpen(false)
+      const v = videoRef.current
+      // First cut: scouting starts at the first serve. A re-cut keeps your place.
+      if (v && (s.cut == null || v.currentTime < start || v.currentTime >= end)) v.currentTime = start
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not start the cut')
+    }
+  }
+
+  function markWindow(edge: 'start' | 'end') {
+    const t = videoRef.current?.currentTime
+    if (t == null) return
+    updateSession((s) => {
+      const next = { ...s.matchWindow, [edge]: Math.round(t * 10) / 10 }
+      if (next.start != null && next.end != null && next.end <= next.start) {
+        if (edge === 'start') next.end = null
+        else next.start = null
+      }
+      return { ...s, matchWindow: next }
+    })
+  }
+
+  function editRallies(edit: (rallies: Rally[], t: number, bounds: Span) => Rally[]) {
+    const v = videoRef.current
+    if (!v) return
+    const s = sessionRef.current
+    const bounds = { start: s.matchWindow.start ?? 0, end: s.matchWindow.end ?? (v.duration || 0) }
+    updateSession((prev) => ({ ...prev, rallies: edit(prev.rallies, v.currentTime, bounds) }))
+  }
+
+  function dropRallyHere() {
+    const t = videoRef.current?.currentTime
+    if (t == null) return
+    updateSession((prev) => {
+      const { rallies, dismissed } = removeRally(prev.rallies, t)
+      return { ...prev, rallies, dismissedAi: dismissed ? [...prev.dismissedAi, dismissed] : prev.dismissedAi }
+    })
+  }
+
+  function seekFromTimeline(t: number, inGap: boolean) {
+    const v = videoRef.current
+    if (!v) return
+    const s = sessionRef.current
+    if (inGap) {
+      const prev = [...s.rallies].filter((r) => r.end <= t).sort((a, b) => b.end - a.end)[0]
+      const next = nextRallyAfter(s.rallies, t)
+      gapHoldRef.current = { start: prev?.end ?? 0, end: next?.start ?? (v.duration || t) }
+    } else {
+      gapHoldRef.current = null
+    }
+    v.currentTime = t
+  }
+
+  // Skip dead time while playing, and stop on a rally that ended without a point winner.
+  useEffect(() => {
+    let frame = 0
+    const tick = () => {
+      frame = requestAnimationFrame(tick)
+      const v = videoRef.current
+      const s = sessionRef.current
+      if (!v || v.paused || v.seeking || !s.cut) return
+      const t = v.currentTime
+      const ws = s.matchWindow.start ?? 0
+      const we = s.matchWindow.end ?? v.duration
+      const hold = gapHoldRef.current
+      const holding = hold != null && t >= hold.start - 0.5 && t <= hold.end + 0.5
+
+      const rally = rallyAt(s.rallies, t)
+      if (rally) {
+        lastRallyIdRef.current = rally.id
+        gapHoldRef.current = null
+        return
+      }
+      const left = lastRallyIdRef.current ? s.rallies.find((r) => r.id === lastRallyIdRef.current) : null
+      lastRallyIdRef.current = null
+      if (left && t >= left.end && !rallyDecided(left, s.events) && !unfinishedShownRef.current.has(left.id)) {
+        unfinishedShownRef.current.add(left.id)
+        v.pause()
+        setUnfinished(left)
+        return
+      }
+      if (!s.skipDeadTime || holding) return
+      if (t >= we - 0.05) {
+        v.pause()
+        return
+      }
+      if (t < ws - 0.25) {
+        v.currentTime = ws
+        return
+      }
+      const next = nextRallyAfter(s.rallies, t)
+      const target = next ? next.start : we
+      if (target - t > 0.4 && spanCovered(s.cut.covered, t, target)) {
+        if (next) v.currentTime = next.start
+        else {
+          v.pause()
+          v.currentTime = we
+        }
+      }
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [])
+
+  // Clear the "no point winner" banner as soon as the rally is decided.
+  useEffect(() => {
+    if (unfinished && rallyDecided(unfinished, session.events)) setUnfinished(null)
+  }, [unfinished, session.events])
   const positionsSig = useMemo(
     () => COURT_POSITIONS.map((p) => session.match.positions[p] ?? '').join('|'),
     [session.match.positions],
@@ -159,10 +398,91 @@ export default function App() {
 
   function onPickVideo(file: File | undefined) {
     if (!file) return
-    if (videoUrl) URL.revokeObjectURL(videoUrl)
-    const url = URL.createObjectURL(file)
+    if (videoUrl?.startsWith('blob:')) URL.revokeObjectURL(videoUrl)
+    void openMatch(videoKeyFor(file), file.name, URL.createObjectURL(file), file)
+  }
+
+  // ?match=<key> reopens a match whose video the local server already has.
+  useEffect(() => {
+    const key = new URLSearchParams(window.location.search).get('match')
+    if (key && /^[\w.-]{1,160}$/.test(key)) {
+      void openMatch(key, sessionRef.current.videoKey === key ? (sessionRef.current.videoName ?? key) : key, `/api/video/${key}/file`, null)
+    }
+    // Run once on load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function openMatch(key: string, name: string, url: string, file: File | null) {
     setVideoUrl(url)
-    updateSession((s) => ({ ...s, videoName: file.name }))
+    setUnfinished(null)
+    unfinishedShownRef.current = new Set()
+    gapHoldRef.current = null
+
+    // Same file again → continue that match. New file → new match with the same roster.
+    let saved: unknown = null
+    try {
+      saved = await loadMatch(key)
+    } catch {
+      saved = null
+    }
+    const current = sessionRef.current
+    if (current.videoKey === key) {
+      // Already on this match (page reload): keep what is in memory.
+    } else if (saved) {
+      try {
+        const next = parseImportedSession(JSON.stringify(saved))
+        setSession({ ...next, videoName: file?.name ?? next.videoName ?? name, videoKey: key })
+        setSetupOpen(next.cut == null)
+      } catch {
+        saved = null
+      }
+    }
+    if (current.videoKey !== key && !saved) {
+      setSession({
+        ...current,
+        ...emptyMatchFields(),
+        videoName: name,
+        videoKey: key,
+        events: [],
+        match: { ...current.match, positions: positionsFromRoster(current.roster), scoreUs: 0, scoreThem: 0, servingTeam: 'us' },
+      })
+      setSetupOpen(true)
+    }
+    undoStackRef.current = []
+    setEditingId(null)
+
+    // The cutter needs the file on disk; copy it to the local server once (same machine).
+    setCopy({ status: 'checking' })
+    try {
+      if (!(await videoOnServer(key))) {
+        if (!file) throw new Error('the local server has no copy of this video; open the file instead')
+        setCopy({ status: 'copying', progress: 0 })
+        await uploadVideo(key, file, (progress) => setCopy({ status: 'copying', progress }))
+      }
+      setCopy({ status: 'ready' })
+    } catch (error) {
+      setCopy({ status: 'error', message: error instanceof Error ? error.message : 'unknown error' })
+    }
+  }
+
+  /** P / O: the point went to us / them, when the deciding touch is not one you track. */
+  function logPoint(winner: 'us' | 'them') {
+    const t = videoRef.current?.currentTime ?? currentTime
+    const event: ScoutEvent = {
+      id: newId('ev'),
+      playerId: TEAM_PLAYER_ID,
+      action: RALLY_POINT_ACTION,
+      outcome: winner,
+      t,
+      source: 'human',
+      status: 'accepted',
+    }
+    pushUndoSnapshot()
+    updateSession((s) => ({
+      ...s,
+      match: applyPossessionChange(s.match, possessionAfterEvent(RALLY_POINT_ACTION, winner, s.match.servingTeam)),
+      events: [...s.events, event].sort((a, b) => a.t - b.t),
+    }))
   }
 
   function seekBy(delta: number) {
@@ -174,9 +494,46 @@ export default function App() {
   function togglePlay() {
     const v = videoRef.current
     if (!v) return
-    if (v.paused) void v.play()
-    else v.pause()
+    if (v.paused) {
+      setUnfinished(null)
+      void v.play()
+    } else v.pause()
   }
+
+  // Match + rally keys. Kept apart from the scout grid keys, which own arrows/Enter/Tab.
+  const setupOpenRef = useRef(setupOpen)
+  setupOpenRef.current = setupOpen
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return
+      const key = e.key.toLowerCase()
+      if (setupOpenRef.current) {
+        if (key === 's' || key === 'e') {
+          e.preventDefault()
+          markWindow(key === 's' ? 'start' : 'end')
+        }
+        return
+      }
+      const actions: Record<string, () => void> = {
+        '[': () => editRallies(setRallyStart),
+        ']': () => editRallies((rallies, t) => setRallyEnd(rallies, t)),
+        k: () => editRallies((rallies, t) => splitRally(rallies, t)),
+        x: dropRallyHere,
+        g: () => updateSession((s) => ({ ...s, skipDeadTime: !s.skipDeadTime })),
+        p: () => logPoint('us'),
+        o: () => logPoint('them'),
+      }
+      const run = actions[key]
+      if (run) {
+        e.preventDefault()
+        run()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // Handlers read live state through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function addOrUpdatePlayer() {
     const name = rosterDraft.name.trim()
@@ -477,7 +834,18 @@ export default function App() {
     ) {
       return
     }
-    const next = defaultSession()
+    // Keep the loaded video, its match window and rallies; only roster and stats reset.
+    const s = sessionRef.current
+    const next: MatchSession = {
+      ...defaultSession(),
+      videoName: s.videoName,
+      videoKey: s.videoKey,
+      matchWindow: s.matchWindow,
+      rallies: s.rallies,
+      dismissedAi: s.dismissedAi,
+      cut: s.cut,
+      skipDeadTime: s.skipDeadTime,
+    }
     saveSession(next)
     setSession(next)
     undoStackRef.current = []
@@ -654,8 +1022,8 @@ export default function App() {
                 className="video-empty"
                 onClick={() => fileInputRef.current?.click()}
               >
-                <strong>Load a local video</strong>
-                <span>File stays in your browser — nothing is uploaded.</span>
+                <strong>Open a match video</strong>
+                <span>The file stays on this PC. Only a small copy of the match window goes to the AI for cutting.</span>
               </button>
             )}
           </div>
@@ -697,9 +1065,56 @@ export default function App() {
               {session.videoName ? ` · ${session.videoName}` : ''}
             </span>
           </div>
+          {session.cut && !setupOpen && (
+            <RallyTimeline
+              duration={duration}
+              window={session.matchWindow}
+              rallies={session.rallies}
+              events={session.events}
+              covered={session.cut.covered}
+              currentTime={currentTime}
+              onSeek={seekFromTimeline}
+            />
+          )}
+          {unfinished && (
+            <div className="banner warn" role="alert">
+              <strong>This rally has no point winner yet.</strong> Log the deciding touch, or press{' '}
+              <kbd>P</kbd> point us / <kbd>O</kbd> point them. <kbd>Space</kbd> plays on anyway.
+            </div>
+          )}
+          {session.cut && !setupOpen && (
+            <CutStatus
+              cut={session.cut}
+              rallies={session.rallies.length}
+              skip={session.skipDeadTime}
+              saveError={saveError}
+              onToggleSkip={() => updateSession((s) => ({ ...s, skipDeadTime: !s.skipDeadTime }))}
+              onCancel={() => session.cut && void cancelCut(session.cut.jobId)}
+              onOpenSetup={() => setSetupOpen(true)}
+            />
+          )}
+          {setupOpen && (
+            <MatchSetup
+              window={session.matchWindow}
+              duration={duration}
+              health={health}
+              copy={copy}
+              cut={session.cut}
+              hasVideo={Boolean(videoUrl)}
+              onMark={markWindow}
+              onClear={(edge) => updateSession((s) => ({ ...s, matchWindow: { ...s.matchWindow, [edge]: null } }))}
+              onSeek={(t) => {
+                const v = videoRef.current
+                if (v) v.currentTime = t
+              }}
+              onCut={() => void onCutRallies()}
+              onDone={() => setSetupOpen(false)}
+            />
+          )}
           <p className="hint">
-            Grid: ←→↑↓ · Enter log · Tab primary · Esc clear · Backspace/U undo · Space
-            play/pause · Seek B/N ±5s · V/M ±1min · ⌘/Ctrl+Enter mark form
+            {setupOpen
+              ? 'Setup: S match start · E match end · Space play/pause · Seek B/N ±5s · V/M ±1min'
+              : 'Grid: ←→↑↓ · Enter log · Tab primary · Esc clear · Backspace/U undo · Space play/pause · Seek B/N ±5s · V/M ±1min · Rallies: [ start here · ] end here · K split · X not a rally · G skip dead time · P point us · O point them'}
           </p>
 
           <section className="panel match-panel">
@@ -969,8 +1384,9 @@ export default function App() {
                       <span className="t">{formatTime(event.t)}</span>
                       <span className="who">{playerLabel(player)}</span>
                       <span className="what">
-                        {labelForAction(event.action)} →{' '}
-                        {labelForOutcome(event.action, event.outcome)}
+                        {event.action === RALLY_POINT_ACTION
+                          ? eventWhat(event.action, event.outcome, labelForOutcome)
+                          : `${labelForAction(event.action)} → ${labelForOutcome(event.action, event.outcome)}`}
                       </span>
                       <span className="src">{event.source}</span>
                     </button>
@@ -993,6 +1409,55 @@ export default function App() {
           </section>
         </aside>
       </main>
+    </div>
+  )
+}
+
+function CutStatus({
+  cut,
+  rallies,
+  skip,
+  saveError,
+  onToggleSkip,
+  onCancel,
+  onOpenSetup,
+}: {
+  cut: CutState
+  rallies: number
+  skip: boolean
+  saveError: string | null
+  onToggleSkip: () => void
+  onCancel: () => void
+  onOpenSetup: () => void
+}) {
+  const progress = cut.chunksTotal > 0 ? Math.round((cut.chunksDone / cut.chunksTotal) * 100) : 0
+  return (
+    <div className="cut-status">
+      <span className={`cut-state ${cut.status}`}>
+        {cut.status === 'running' && `Cutting… ${progress}% · ${rallies} rallies so far`}
+        {cut.status === 'done' && `${rallies} rallies`}
+        {cut.status === 'failed' && `Cut stopped: ${cut.error ?? 'unknown error'}`}
+        {cut.status === 'cancelled' && `Cut cancelled · ${rallies} rallies`}
+      </span>
+      {cut.warnings.length > 0 && (
+        <span className="muted" title={cut.warnings.join('\n')}>
+          {cut.warnings.length} piece{cut.warnings.length === 1 ? '' : 's'} not analysed (played normally)
+        </span>
+      )}
+      {saveError && <span className="cut-state failed">Not saved to matches/: {saveError}</span>}
+      <span className="cut-actions">
+        <button type="button" className={skip ? 'primary' : 'ghost'} onClick={onToggleSkip} title="G">
+          Skip dead time: {skip ? 'on' : 'off'}
+        </button>
+        {cut.status === 'running' && (
+          <button type="button" className="ghost" onClick={onCancel}>
+            Stop cutting
+          </button>
+        )}
+        <button type="button" className="ghost" onClick={onOpenSetup}>
+          Match window…
+        </button>
+      </span>
     </div>
   )
 }

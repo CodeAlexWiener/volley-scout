@@ -806,3 +806,270 @@ button.wide {
     width: 100%;
   }
 }
+
+/* ── Match setup ───────────────────────────────────────── */
+kbd {
+  display: inline-block;
+  min-width: 1.2em;
+  padding: 0 0.3em;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 0.25rem;
+  font: 600 0.75rem/1.4 var(--font-body);
+  text-align: center;
+  background: color-mix(in oklab, var(--panel) 70%, black);
+  color: var(--ink);
+}
+
+.panel.setup {
+  border-color: color-mix(in oklab, var(--sand) 55%, var(--line));
+}
+
+.setup-lead {
+  margin: 0 0 0.75rem;
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.window-edges {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.6rem;
+}
+
+.edge {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: color-mix(in oklab, var(--court) 70%, transparent);
+}
+
+.edge.empty {
+  border-style: dashed;
+}
+
+.edge-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.edge-time {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.edge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.window-summary {
+  margin: 0.6rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.window-summary strong {
+  color: var(--accent);
+}
+
+.setup-cut {
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.setup-cut h3 {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-display);
+  font-size: 1rem;
+}
+
+.setup-blockers {
+  margin: 0 0 0.6rem;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--sand);
+}
+
+/* ── Rally timeline ────────────────────────────────────── */
+.timeline {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0.25rem;
+}
+
+.timeline-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.timeline-meta .warn,
+.cut-state.failed {
+  color: var(--sand);
+}
+
+.strip-wrap {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.strip-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.strip {
+  position: relative;
+  height: 1.1rem;
+  border-radius: 0.3rem;
+  overflow: hidden;
+  cursor: pointer;
+  background: color-mix(in oklab, var(--court) 60%, black);
+}
+
+.strip.detail {
+  height: 2rem;
+}
+
+.seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.seg.outside,
+.leg-outside {
+  background: repeating-linear-gradient(135deg, #0006 0 4px, #0002 4px 8px);
+}
+
+.seg.unseen,
+.leg-unseen {
+  background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--muted) 30%, transparent) 0 3px, transparent 3px 7px);
+}
+
+.seg.gap,
+.leg-gap {
+  /* Opaque: covers the "not analysed yet" hatching underneath. */
+  background: color-mix(in oklab, var(--muted) 22%, var(--court));
+}
+
+.seg.rally {
+  min-width: 2px;
+  border-radius: 2px;
+}
+
+.seg.rally.done,
+.leg-rally.done {
+  background: var(--accent);
+}
+
+.seg.rally.open,
+.leg-rally.open {
+  background: var(--sand);
+}
+
+.seg.rally.human {
+  box-shadow: inset 0 -3px 0 color-mix(in oklab, white 55%, transparent);
+}
+
+.seg.rally.current {
+  outline: 2px solid white;
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+.tick {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 35%;
+  background: var(--navy);
+  transform: translateX(-1px);
+  z-index: 2;
+}
+
+.playhead {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: white;
+  transform: translateX(-1px);
+  z-index: 3;
+  box-shadow: 0 0 0 1px #0008;
+}
+
+.timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.timeline-legend i {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.6rem;
+  margin-right: 0.3rem;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+/* ── Cut status + banners ──────────────────────────────── */
+.cut-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.9rem;
+  margin: 0.35rem 0;
+  font-size: 0.85rem;
+}
+
+.cut-state.running {
+  color: var(--accent);
+}
+
+.cut-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+.banner {
+  margin: 0.4rem 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.45rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.banner.warn {
+  background: color-mix(in oklab, var(--sand) 18%, transparent);
+  border: 1px solid color-mix(in oklab, var(--sand) 60%, transparent);
+}
+
+@media (max-width: 640px) {
+  .strip-wrap {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+  }
+  .cut-actions {
+    margin-left: 0;
+  }
+}
