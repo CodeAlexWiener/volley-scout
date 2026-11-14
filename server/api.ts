@@ -43,6 +43,11 @@ export function scoutApi(root: string, env: Env): Plugin {
     const [, area, id] = parts
     const method = req.method ?? 'GET'
 
+    // Only this app may call the API: other websites open in the browser must not
+    // read matches, write files or spend the Gemini quota.
+    const refusal = refuseForeign(req, method)
+    if (refusal) return send(res, 403, { error: refusal })
+
     if (area === 'health' && method === 'GET') {
       return send(res, 200, {
         geminiKey: apiKey().length > 0,
@@ -134,6 +139,38 @@ export function scoutApi(root: string, env: Env): Plugin {
       })
     },
   }
+}
+
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+
+function hostname(value: string | undefined): string | null {
+  if (!value) return null
+  try {
+    return new URL(value.includes('://') ? value : `http://${value}`).hostname
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Returns a reason to refuse, or null.
+ * - Host must be a loopback name: blocks DNS rebinding (evil.com resolving to 127.0.0.1).
+ * - Writes from a browser must come from this same origin: blocks CSRF from other sites.
+ *   No Origin header at all means a non-browser client such as curl on this machine.
+ * - JSON endpoints need a JSON content type, which other sites cannot send without a preflight.
+ */
+export function refuseForeign(req: IncomingMessage, method: string): string | null {
+  const host = hostname(req.headers.host)
+  if (!host || !LOCAL_HOSTS.has(host)) return 'Only reachable as localhost'
+  if (method === 'GET' || method === 'HEAD') return null
+  const origin = req.headers.origin
+  if (origin !== undefined && origin !== `http://${req.headers.host}`) return 'Cross-origin request refused'
+  const isVideoUpload = method === 'PUT' && /^\/api\/video\//.test(req.url ?? '')
+  const type = req.headers['content-type'] ?? ''
+  if (!isVideoUpload && method !== 'DELETE' && !type.startsWith('application/json')) {
+    return 'Expected application/json'
+  }
+  return null
 }
 
 /** Serve the local video copy with HTTP Range support so the player can seek. */
